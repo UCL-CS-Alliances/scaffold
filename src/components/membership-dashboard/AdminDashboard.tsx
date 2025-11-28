@@ -1,16 +1,22 @@
 // src/components/membership-dashboard/AdminDashboard.tsx
 import type { AdminDashboardSummary } from "@/lib/membership-dashboard";
 
-type AdminDashboardProps = AdminDashboardSummary;
+type AdminDashboardProps = AdminDashboardSummary & {
+  title?: string;
+  intro?: string;
+};
 
 export default function AdminDashboard({
   totalMembers,
   tiers,
+  title = "Membership Dashboard – Admin View",
+  intro,
 }: AdminDashboardProps) {
   return (
     <section className="content-section">
       <header className="content-header">
-        <h1>Membership Dashboard – Admin View</h1>
+        <h1>{title}</h1>
+        {intro && <p>{intro}</p>}
       </header>
 
       <p>
