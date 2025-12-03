@@ -16,9 +16,13 @@ export const siteAnnouncement: Announcement = {
 };
 
 export const siteMeta = {
-  // Version comes from package.json (single source of truth)
+  // Version from package.json (single source of truth)
   version: pkg.version,
-
-  // Status is controlled here (e.g. "closed alpha", "beta", "public release")
+  // Status label you control manually
   status: "closed alpha",
+
+  // From _data/site.yml
+  tagline: "We bond the pioneers of our future",
+  mission:
+    "In alliance with our collaborators, we empower our students to learn from real-world challenges, our academics to apply their research rigour in practice, and our industry partners to innovate with confidence at low risk.",
 };

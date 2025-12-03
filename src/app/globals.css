@@ -307,3 +307,275 @@ img {
 .releases li + li {
   margin-top: 0.5rem;
 }
+
+/* --- Home sections --- */
+.home-intro {
+  margin-bottom: 2rem;
+}
+
+.home-intro h1 {
+  margin-bottom: 0.75rem;
+}
+
+.home-intro p {
+  max-width: 60ch;
+  font-size: 1.05rem;
+}
+
+.home-pathways {
+  margin-bottom: 2.5rem;
+}
+
+.home-pathways > p {
+  max-width: 60ch;
+}
+
+/* Optional news area, mirroring Jekyll */
+.home-news {
+  margin-top: 2.5rem;
+}
+
+.home-news h2 {
+  margin-bottom: 0.75rem;
+}
+
+/* --- Stack utility (vertical spacing) --- */
+.stack > * + * {
+  margin-top: var(--stack-gap, 0.75rem);
+}
+
+/* --- Service & pathway pages --- */
+article.service,
+article.pathway {
+  max-width: 60rem;
+  margin: 1.5rem auto;
+}
+
+article.service header,
+article.pathway header {
+  margin-bottom: 1.5rem;
+}
+
+article.service header h1,
+article.pathway header h1 {
+  margin-bottom: 0.5rem;
+}
+
+article.service header p,
+article.pathway header p {
+  max-width: 60ch;
+}
+
+article.service hr,
+article.pathway hr {
+  margin: 2rem 0 1.5rem;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+/* Ensure related services / info sections breathe a bit */
+.related-services {
+  margin-top: 1.5rem;
+}
+
+.related-services h2 {
+  margin-bottom: 0.5rem;
+}
+
+/* Generic content section used by dashboard / sign-in pages */
+.content-section {
+  max-width: 60rem;
+  margin: 1.5rem auto;
+}
+
+.content-header {
+  margin-bottom: 1.5rem;
+}
+
+.content-header h1 {
+  margin-bottom: 0.5rem;
+}
+
+.content-header p {
+  max-width: 60ch;
+}
+
+/* Dropdown panels for nav menus */
+.menu-panel {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  min-width: 14rem;
+  margin: 0;
+  padding: 0.5rem;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  z-index: 1000;
+}
+
+.menu-panel [role="menuitem"] {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  text-decoration: none;
+}
+
+.menu-panel [role="menuitem"]:hover,
+.menu-panel [role="menuitem"]:focus {
+  background: #f5f5f5;
+  text-decoration: none;
+}
+
+/* Keep panels inside on small screens */
+@media (max-width: 900px) {
+  .nav-root {
+    flex-wrap: wrap;
+  }
+  .menu-panel {
+    position: static;
+    box-shadow: none;
+    border-radius: 6px;
+    margin-top: 0.25rem;
+  }
+}
+
+/* List + spacing utilities */
+.list-plain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+}
+
+/* Tiles (cards) with hover lift */
+.tile {
+  position: relative;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--card);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  box-shadow: var(--shadow-0);
+}
+
+.tile:hover,
+.tile:focus-within {
+  transform: translateY(-2px);
+  border-color: #e0e7ff;
+  box-shadow: var(--shadow-2);
+}
+
+/* Gradient-border variant used on homepage pathway cards */
+.tile--gradient {
+  position: relative;
+  background: var(--card);
+  border: 1px solid transparent;
+  background-image: var(--grad-blue, linear-gradient(180deg, #ffffff, #eef5ff)),
+    var(--grad-outline, linear-gradient(180deg, #cfe0ff, #eaf1ff));
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  border-radius: var(--radius-md);
+}
+
+/* Ensure clickable heading inside the tile is visibly focusable */
+.tile h3 a {
+  text-decoration: none;
+}
+.tile h3 a:focus {
+  outline: 2px solid #005bbb;
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* News list (for later) */
+.news-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.news-list li {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.news-list li:last-child {
+  border-bottom: 0;
+}
+
+/* Headings + small text */
+h1,
+h2,
+h3 {
+  color: var(--ucl-ink-2);
+}
+
+h1 {
+  font-size: clamp(1.8rem, (1.4rem + 1.2vw), 2.4rem);
+}
+
+h2 {
+  font-size: clamp(1.35rem, (1.1rem + 0.6vw), 1.7rem);
+}
+
+h3 {
+  font-size: 1.1rem;
+  margin: 1rem 0 0.4rem;
+}
+
+p,
+li {
+  color: var(--ucl-ink-2);
+}
+
+.small {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+/* Inputs used in future forms */
+.input {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  width: min(28rem, 100%);
+}
+
+/* Benefit list styling (future membership UI) */
+.benefit {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.benefit-state {
+  display: inline-flex;
+  width: 1.5rem;
+  justify-content: center;
+}
+
+/* Pathway tiles grid */
+.grid {
+  display: grid;
+  gap: 2rem;
+  grid-template-columns: 1fr; /* default: single column */
+}
+
+/* (nice-to-have) make cards stretch evenly */
+.grid > .card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Larger screens: up to two side-by-side cards */
+@media (min-width: 1720px) {
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
