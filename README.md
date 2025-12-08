@@ -1,5 +1,5 @@
 # scaffold
-A repository for all Alliances Platform web app development. Initial experimentation and learning by Daniel.
+Welcome to the repository for all Alliances Platform web app development. Initial experimentation and learning by Daniel.
 
 ---
 
