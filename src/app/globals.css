@@ -579,3 +579,55 @@ li {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* Secondary navigation pills (used on membership dashboard) */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #f9fafb;
+  font-size: 0.9rem;
+  line-height: 1.3;
+  text-decoration: none;
+  color: var(--ucl-ink-2);
+  cursor: pointer;
+}
+
+.pill:hover,
+.pill:focus {
+  background: #f3f4ff;
+  text-decoration: none;
+  outline: 2px solid transparent;
+}
+
+/* Disabled state (for now these are placeholders) */
+.pill[disabled],
+.pill[aria-disabled="true"] {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* Membership summary definition list */
+.membership-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem 1.25rem;
+  margin: 0;
+  padding: 0;
+}
+
+.membership-meta dt {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 0.1rem;
+}
+
+.membership-meta dd {
+  margin: 0;
+  font-size: 0.95rem;
+}

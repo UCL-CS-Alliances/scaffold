@@ -17,7 +17,15 @@ export type AdminDashboardSummary = {
 export type MemberDashboardData = {
   firstName: string;
   organisationName: string | null;
-  tierLabel: string;
+
+  // Membership info
+  membershipTierLabel: string;
+  membershipTierKey: string | null;
+  membershipTierRank: number | null;
+  membershipExpiry: Date | null;
+  membershipManagerName: string | null;
+
+  // Dashboard-specific data
   redeemedBenefitCodes: string[];
 };
 
@@ -83,13 +91,22 @@ export async function getMemberDashboardData(
   const membership = user.memberships.at(0) ?? null;
 
   const tierLabel = membership?.membershipTier.label ?? "Unknown tier";
+  const tierKey = membership?.membershipTier.key ?? null;
+  const tierRank = membership?.membershipTier.rank ?? null;
+  const expiry = membership?.expiry ?? null;
+  const managerName = membership?.managerName ?? null;
+
   const redeemedBenefitCodes =
     user.membershipDashboardMember?.redeemedBenefitCodes ?? [];
 
   return {
     firstName: user.firstName,
     organisationName: user.organisation?.name ?? null,
-    tierLabel,
+    membershipTierLabel: tierLabel,
+    membershipTierKey: tierKey,
+    membershipTierRank: tierRank,
+    membershipExpiry: expiry,
+    membershipManagerName: managerName,
     redeemedBenefitCodes,
   };
 }

@@ -11,7 +11,7 @@ import {
 export const metadata: Metadata = {
   title: "Home – Alliances (UCL Computer Science)",
   description:
-    "A scaffold site for enhancing the Alliances digital experience at UCL Computer Science.",
+    "Welcome to Alliances at UCL Computer Science, your one-stop-shop for all things university-industry engagement.",
 };
 
 export default function HomePage() {
