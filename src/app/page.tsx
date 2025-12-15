@@ -49,7 +49,7 @@ export default function HomePage() {
                     style={{ "--stack-gap": ".5rem" } as CSSProperties}
                   >
                     <h4 className="spotlight-title">Service spotlight</h4>
-                    <ul className="list-plain cluster">
+                    <ul className="spotlight-pills">
                       {spotlights.map((svc) => (
                         <li key={svc.slug}>
                           <Link

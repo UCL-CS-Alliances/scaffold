@@ -1,5 +1,3 @@
-// src/app/membership-dashboard/benefits/[benefitId]/page.tsx
-
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import {
@@ -9,6 +7,7 @@ import {
 } from "@/content/benefits";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { getMemberDashboardData } from "@/lib/membership-dashboard";
+import SecondaryNav from "@/components/membership-dashboard/SecondaryNav";
 
 type PageProps = {
   params: Promise<{ benefitId: string }>;
@@ -40,6 +39,17 @@ function getStatusMeta(status: BenefitStatus) {
     default:
       return { symbol: "🔒", label: "Not included in your tier" };
   }
+}
+
+// Support both legacy array process and the newer structured process object
+type ProcessObject = {
+  trigger?: string;
+  actions?: string[];
+  outcome?: string;
+};
+
+function isProcessObject(value: unknown): value is ProcessObject {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 export default async function BenefitPage({ params }: PageProps) {
@@ -77,15 +87,30 @@ export default async function BenefitPage({ params }: PageProps) {
   const status = determineStatus(hasAccess, isRedeemed);
   const { symbol, label } = getStatusMeta(status);
 
+  const backHref = "/membership-dashboard/";
+
+  const processValue = benefit.process as unknown;
+
+  const processAsObject = isProcessObject(processValue)
+    ? (processValue as ProcessObject)
+    : null;
+
+  const processAsArray = Array.isArray(processValue)
+    ? (processValue as string[])
+    : null;
+
   return (
     <section className="content-section">
-      <header className="content-header">
+      <header className="content-header benefit-detail-header">
         <h1>{benefit.label}</h1>
-        <p>{benefit.description}</p>
+        <p className="benefit-detail-description">{benefit.description}</p>
       </header>
 
+      {/* Secondary navigation (same as member dashboard) */}
+      <SecondaryNav />
+
       {/* Status */}
-      <section style={{ marginTop: "1rem", marginBottom: "1.5rem" }}>
+      <section className="benefit-status" style={{ marginTop: "1rem" }}>
         <h2>
           Status: {label} {symbol}
         </h2>
@@ -99,7 +124,10 @@ export default async function BenefitPage({ params }: PageProps) {
             </p>
 
             <p style={{ marginTop: "1.25rem" }}>
-              <Link href="/membership-dashboard/" className="button-link">
+              <Link
+                href={backHref}
+                className="button-link button-link--secondary"
+              >
                 Back to benefits list
               </Link>
             </p>
@@ -109,15 +137,32 @@ export default async function BenefitPage({ params }: PageProps) {
         {status === "NO_ACCESS" && (
           <>
             <p>
-              This benefit is not included in your membership tier. You may
-              discuss upgrade options during your next client experience
-              check-in — for example via the{" "}
-              <strong>“Schedule your next client experience check-in”</strong>{" "}
-              button in the membership dashboard.
+              This benefit is not included in your membership tier. Please
+              consider upgrading your membership and scheduling a call with your
+              client experience manager to discuss options.
             </p>
 
             <p style={{ marginTop: "1.25rem" }}>
-              <Link href="/membership-dashboard/" className="button-link">
+              <Link
+                href="/membership-dashboard/upgrade"
+                className="button-link button-link--primary"
+                style={{ marginRight: "0.75rem" }}
+              >
+                Explore membership upgrade options
+              </Link>
+
+              <Link
+                href="/membership-dashboard/book-client-experience-call"
+                className="button-link button-link--primary"
+                style={{ marginRight: "0.75rem" }}
+              >
+                Schedule a call
+              </Link>
+
+              <Link
+                href={backHref}
+                className="button-link button-link--secondary"
+              >
                 Back to benefits list
               </Link>
             </p>
@@ -126,7 +171,8 @@ export default async function BenefitPage({ params }: PageProps) {
 
         {status === "HAS_ACCESS" && (
           <p>
-            You have access to this benefit and have not yet redeemed it. Coordinate next steps with your client experience manager.
+            You have access to this benefit and have not yet redeemed it.
+            Coordinate next steps with your client experience manager.
           </p>
         )}
       </section>
@@ -135,55 +181,66 @@ export default async function BenefitPage({ params }: PageProps) {
       {status === "HAS_ACCESS" && (
         <>
           {/* Process */}
-          {benefit.process && (
-            <section style={{ marginTop: "1.5rem" }}>
+          {(processAsObject || (processAsArray && processAsArray.length > 0)) && (
+            <section className="benefit-process" style={{ marginTop: "1.5rem" }}>
               <h2>How this benefit works</h2>
-<p>To
-            redeem this benefit, follow the process outlined below.</p>
-              {/* Trigger */}
-              {benefit.process.trigger && (
-                <section style={{ marginTop: "1rem" }}>
-                  <h3>Trigger</h3>
-                  <p>{benefit.process.trigger}</p>
-                  <button
-                    type="button"
-                    className="button-link"
-                    disabled
-                    aria-disabled="true"
-                    style={{ marginTop: "0.5rem" }}
-                  >
-                    Redeem benefit now
-                  </button>
-                </section>
+              <p>To redeem this benefit, follow the process outlined below.</p>
+
+              {/* New structured process */}
+              {processAsObject && (
+                <>
+                  {processAsObject.trigger && (
+                    <section style={{ marginTop: "1rem" }}>
+                      <h3>Trigger</h3>
+                      <p>{processAsObject.trigger}</p>
+                      <button
+                        type="button"
+                        className="button-link button-link--primary"
+                        disabled
+                        aria-disabled="true"
+                        style={{ marginTop: "0.5rem" }}
+                      >
+                        Redeem benefit now
+                      </button>
+                    </section>
+                  )}
+
+                  {processAsObject.actions && processAsObject.actions.length > 0 && (
+                    <section style={{ marginTop: "1.25rem" }}>
+                      <h3>Actions</h3>
+                      <ul>
+                        {processAsObject.actions.map((step, idx) => (
+                          <li key={idx}>{step}</li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+
+                  {processAsObject.outcome && (
+                    <section style={{ marginTop: "1.25rem" }}>
+                      <h3>Outcome</h3>
+                      <p>{processAsObject.outcome}</p>
+                      <button
+                        type="button"
+                        className="button-link button-link--primary"
+                        disabled
+                        aria-disabled="true"
+                        style={{ marginTop: "0.5rem" }}
+                      >
+                        Launch partner satisfaction survey
+                      </button>
+                    </section>
+                  )}
+                </>
               )}
 
-              {/* Actions */}
-              {benefit.process.actions && benefit.process.actions.length > 0 && (
-                <section style={{ marginTop: "1.25rem" }}>
-                  <h3>Actions</h3>
-                  <ul>
-                    {benefit.process.actions.map((step, idx) => (
-                      <li key={idx}>{step}</li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-
-              {/* Outcome */}
-              {benefit.process.outcome && (
-                <section style={{ marginTop: "1.25rem" }}>
-                  <h3>Outcome</h3>
-                  <p>{benefit.process.outcome}</p>
-                  <button
-                    type="button"
-                    className="button-link"
-                    disabled
-                    aria-disabled="true"
-                    style={{ marginTop: "0.5rem" }}
-                  >
-                    Launch partner satisfaction survey
-                  </button>
-                </section>
+              {/* Legacy array process (fallback) */}
+              {processAsArray && (
+                <ul style={{ marginTop: "1rem" }}>
+                  {processAsArray.map((step, idx) => (
+                    <li key={idx}>{step}</li>
+                  ))}
+                </ul>
               )}
             </section>
           )}
@@ -201,7 +258,10 @@ export default async function BenefitPage({ params }: PageProps) {
           )}
 
           <section style={{ marginTop: "2rem" }}>
-            <Link href="/membership-dashboard/" className="button-link">
+            <Link
+              href={backHref}
+              className="button-link button-link--secondary"
+            >
               Back to benefits list
             </Link>
           </section>

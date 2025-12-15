@@ -1,11 +1,16 @@
 // src/components/membership-dashboard/MemberDashboard.tsx
+"use client";
+
 import Link from "next/link";
 import type { CSSProperties } from "react";
+import { useMemo, useState } from "react";
 import {
   BENEFITS,
   MEMBERSHIP_TIER_RANK,
   MembershipTierKey,
 } from "@/content/benefits";
+import SecondaryNav from "@/components/membership-dashboard/SecondaryNav";
+import BenefitsFilterToolbar from "@/components/membership-dashboard/BenefitsFilterToolbar";
 
 type MemberDashboardProps = {
   firstName: string;
@@ -20,6 +25,8 @@ type MemberDashboardProps = {
   redeemedBenefitCodes: string[];
 };
 
+type BenefitFilter = "redeemed" | "available" | "locked" | null;
+
 function normaliseTierKey(key: string | null): MembershipTierKey | null {
   if (!key) return null;
   const lower = key.toLowerCase() as MembershipTierKey;
@@ -28,36 +35,46 @@ function normaliseTierKey(key: string | null): MembershipTierKey | null {
     : null;
 }
 
-export default function MemberDashboard({
-  firstName,
-  organisationName,
-  membershipTierLabel,
-  membershipTierKey,
-  membershipTierRank,
-  membershipExpiry,
-  membershipManagerName,
-  redeemedBenefitCodes,
-}: MemberDashboardProps) {
+export default function MemberDashboard(props: MemberDashboardProps) {
+  const {
+    firstName,
+    organisationName,
+    membershipTierLabel,
+    membershipTierKey,
+    membershipTierRank,
+    membershipExpiry,
+    membershipManagerName,
+    redeemedBenefitCodes,
+  } = props;
+
+  const [filter, setFilter] = useState<BenefitFilter>(null);
+
   const normTierKey = normaliseTierKey(membershipTierKey);
   const myRank =
     membershipTierRank ??
     (normTierKey ? MEMBERSHIP_TIER_RANK[normTierKey] : null);
 
-  const redeemed = new Set(redeemedBenefitCodes);
+  const redeemed = useMemo(() => new Set(redeemedBenefitCodes), [redeemedBenefitCodes]);
 
   // Superseded benefits
-  const superseded = new Set<string>();
-  if (myRank !== null) {
-    BENEFITS.forEach((b) => {
-      if (!b.supersedes || !b.supersedes.length) return;
-      const needed = MEMBERSHIP_TIER_RANK[b.tierMin];
-      if (myRank >= needed) {
-        b.supersedes.forEach((id) => superseded.add(id));
-      }
-    });
-  }
+  const superseded = useMemo(() => {
+    const s = new Set<string>();
+    if (myRank !== null) {
+      BENEFITS.forEach((b) => {
+        if (!b.supersedes || !b.supersedes.length) return;
+        const needed = MEMBERSHIP_TIER_RANK[b.tierMin];
+        if (myRank >= needed) {
+          b.supersedes.forEach((id) => s.add(id));
+        }
+      });
+    }
+    return s;
+  }, [myRank]);
 
-  const benefitsEffective = BENEFITS.filter((b) => !superseded.has(b.id));
+  const benefitsEffective = useMemo(
+    () => BENEFITS.filter((b) => !superseded.has(b.id)),
+    [superseded],
+  );
 
   const formattedExpiry =
     membershipExpiry != null
@@ -71,6 +88,41 @@ export default function MemberDashboard({
     membershipManagerName && membershipManagerName.trim().length
       ? membershipManagerName
       : "Marco Piccionello";
+
+  // Build benefit rows with computed state
+  const benefitRows = useMemo(() => {
+    return benefitsEffective.map((b) => {
+      const neededRank = MEMBERSHIP_TIER_RANK[b.tierMin];
+
+      let state: Exclude<BenefitFilter, null> = "locked";
+      let symbol = "🔒";
+
+      if (myRank !== null && myRank >= neededRank) {
+        if (redeemed.has(b.id)) {
+          state = "redeemed";
+          symbol = "✅";
+        } else {
+          state = "available";
+          symbol = "🟡";
+        }
+      }
+
+      return { benefit: b, state, symbol };
+    });
+  }, [benefitsEffective, myRank, redeemed]);
+
+  const counts = useMemo(() => {
+    const c = { redeemed: 0, available: 0, locked: 0 };
+    benefitRows.forEach((r) => {
+      c[r.state] += 1;
+    });
+    return c;
+  }, [benefitRows]);
+
+  const visibleRows = useMemo(() => {
+    if (!filter) return benefitRows;
+    return benefitRows.filter((r) => r.state === filter);
+  }, [benefitRows, filter]);
 
   return (
     <section
@@ -86,31 +138,13 @@ export default function MemberDashboard({
         Science Alliances dashboard.
       </p>
 
-      {/* Secondary navigation – renamed items, still placeholders for now */}
-      <nav aria-label="Secondary" className="cluster">
-        <button
-          type="button"
-          className="pill"
-          aria-disabled="true"
-          disabled
-          title="This action will be enabled in a future release."
-        >
-          Schedule your next client experience check-in
-        </button>
-        <button
-          type="button"
-          className="pill"
-          aria-disabled="true"
-          disabled
-          title="This action will be enabled in a future release."
-        >
-          Send a custom engagement request
-        </button>
-      </nav>
+      {/* Secondary navigation */}
+      <SecondaryNav />
 
       {/* Membership summary */}
       <section className="tile" style={{ padding: "0.75rem 1rem" }}>
         <h2 style={{ marginTop: 0, marginBottom: "0.75rem" }}>Membership</h2>
+
         <dl className="membership-meta">
           <div>
             <dt>Organisation</dt>
@@ -125,7 +159,7 @@ export default function MemberDashboard({
             <dd>{formattedExpiry}</dd>
           </div>
           <div>
-            <dt>Account manager</dt>
+            <dt>Client experience manager</dt>
             <dd>{manager}</dd>
           </div>
         </dl>
@@ -134,41 +168,32 @@ export default function MemberDashboard({
       {/* Benefits list */}
       <section
         className="stack"
-        style={{ "--stack-gap": ".5rem" } as CSSProperties}
+        style={{ "--stack-gap": ".75rem" } as CSSProperties}
       >
         <h2>Benefits</h2>
-        <p className="small">
-          Legend: ✅ redeemed · 🟡 available · 🔒 not included in your tier
-        </p>
+
+        {/* Filter toolbar (right-aligned) */}
+        <BenefitsFilterToolbar value={filter} onChange={setFilter} counts={counts} />
 
         <ul
           className="list-plain stack"
           style={{ "--stack-gap": ".5rem" } as CSSProperties}
         >
-          {benefitsEffective.map((b) => {
-            const neededRank = MEMBERSHIP_TIER_RANK[b.tierMin];
-
-            let symbol = "🔒";
-            if (myRank !== null && myRank >= neededRank) {
-              symbol = redeemed.has(b.id) ? "✅" : "🟡";
-            }
-
-            return (
-              <li key={b.id}>
-                <div className="tile" style={{ padding: ".5rem .75rem" }}>
-                  <div className="benefit">
-                    <span className="benefit-state">{symbol}</span>
-                    <Link
-                      href={`/membership-dashboard/benefits/${b.id}`}
-                      className="benefit-link"
-                    >
-                      <strong>{b.label}</strong>
-                    </Link>
-                  </div>
+          {visibleRows.map(({ benefit: b, symbol }) => (
+            <li key={b.id}>
+              <div className="tile" style={{ padding: ".5rem .75rem" }}>
+                <div className="benefit">
+                  <span className="benefit-state">{symbol}</span>
+                  <Link
+                    href={`/membership-dashboard/benefits/${b.id}`}
+                    className="benefit-link"
+                  >
+                    <strong>{b.label}</strong>
+                  </Link>
                 </div>
-              </li>
-            );
-          })}
+              </div>
+            </li>
+          ))}
         </ul>
       </section>
     </section>

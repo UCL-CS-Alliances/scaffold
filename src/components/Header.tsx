@@ -21,6 +21,9 @@ export default function Header() {
   const isAuthenticated = status === "authenticated";
   const user = session?.user;
 
+const roleKeys = ((user as any)?.roleKeys ?? []) as string[];
+const isAdmin = roleKeys.includes("ADMIN");
+
   const studentsServices = getServicesForAudience("students");
   const researchersServices = getServicesForAudience("researchers");
   const partnersServices = getServicesForAudience("partners");
@@ -155,6 +158,7 @@ export default function Header() {
                         role="menuitem"
                         className="nav-link"
                         href={`/services/${svc.slug}`}
+                        onClick={closeAllMenus}
                       >
                         {label}
                       </Link>
@@ -207,6 +211,7 @@ export default function Header() {
                         role="menuitem"
                         className="nav-link"
                         href={`/services/${svc.slug}`}
+                        onClick={closeAllMenus}
                       >
                         {label}
                       </Link>
@@ -259,6 +264,7 @@ export default function Header() {
                         role="menuitem"
                         className="nav-link"
                         href={`/services/${svc.slug}`}
+                        onClick={closeAllMenus}
                       >
                         {label}
                       </Link>
@@ -298,15 +304,41 @@ export default function Header() {
                       {user?.name ?? user?.email ?? "Alliances user"}
                     </span>
                   </li>
+{isAdmin && (
+  <li role="none">
+    <Link
+      className="nav-link"
+      role="menuitem"
+      href="/account/add-user"
+      onClick={closeAllMenus}
+    >
+      Add user
+    </Link>
+  </li>
+)}
+
+<li role="none">
+  <Link
+    className="nav-link"
+    role="menuitem"
+    href="/account"
+    onClick={closeAllMenus}
+  >
+    Edit profile
+  </Link>
+</li>
                   <li role="none">
-                    <button
-                      type="button"
-                      className="nav-link"
-                      role="menuitem"
-                      onClick={() => signOut()}
-                    >
-                      Sign out
-                    </button>
+                  <button
+                    type="button"
+                    className="nav-link"
+                    role="menuitem"
+                    onClick={() => {
+                      closeAllMenus();
+                      signOut();
+                    }}
+                  >
+                    Sign out
+                  </button>
                   </li>
                 </ul>
               </li>

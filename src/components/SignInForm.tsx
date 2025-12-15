@@ -1,150 +1,210 @@
 // src/components/SignInForm.tsx
 "use client";
 
-import { FormEvent, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { signIn, useSession, getSession } from "next-auth/react";
+import { useId, useState } from "react";
+import { signIn } from "next-auth/react";
 
 type SignInFormProps = {
-  /**
-   * Fallback redirect if no ?callbackUrl=... is present
-   * AND no role-based redirect applies.
-   */
-  defaultRedirect?: string;
+  defaultRedirect: string;
 };
 
-// Role → landing page mapping (in priority order)
-const ROLE_REDIRECTS: Array<{ key: string; path: string }> = [
-  { key: "ADMIN", path: "/membership-dashboard" },
-  { key: "MEMBER", path: "/membership-dashboard" },
-  { key: "ACADEMIC", path: "/ixn-workflow-manager" },
-  { key: "MODULE_LEADER", path: "/ixn-workflow-manager" },
-];
-
-function getRoleBasedRedirect(roleKeys: string[] | undefined | null): string | null {
-  if (!roleKeys || roleKeys.length === 0) return null;
-  for (const { key, path } of ROLE_REDIRECTS) {
-    if (roleKeys.includes(key)) return path;
-  }
-  return null;
-}
-
-export default function SignInForm({ defaultRedirect = "/" }: SignInFormProps) {
-  const { data: session, status } = useSession();
-  const router = useRouter();
-  const searchParams = useSearchParams();
+export default function SignInForm({ defaultRedirect }: SignInFormProps) {
+  const helpId = useId();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // If already signed in, show a simple status instead of the form
-  if (status === "authenticated" && session?.user) {
-    return (
-      <section
-        className="signin-section"
-        aria-label="You are already signed in"
-      >
-        <p>
-          You are signed in as{" "}
-          <strong>{session.user.name ?? session.user.email}</strong>.
-        </p>
-      </section>
-    );
+  const registerHelp =
+    "Register is currently only available to admins for adding new users.";
+
+  function normalisedEmail(value: string) {
+    return value.trim().toLowerCase();
   }
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  function goRegisterDenied() {
+    window.location.assign("/access-denied?reason=register-admin-only");
+  }
+
+  async function handleSignIn(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
 
-    const requestedCallbackUrl = searchParams.get("callbackUrl") ?? null;
+    const emailNormalised = normalisedEmail(email);
 
-    // First, perform credential sign-in (no automatic redirect)
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-      callbackUrl: requestedCallbackUrl ?? defaultRedirect ?? "/",
-    });
+    try {
+      const res = await signIn("credentials", {
+        redirect: false,
+        email: emailNormalised,
+        password,
+      });
 
-    setSubmitting(false);
+      if (!res?.ok) {
+        setError("Invalid email or password.");
+        return;
+      }
 
-    if (!result) {
-      setError("Unexpected error. Please try again.");
+      window.location.assign(defaultRedirect);
+    } catch {
+      setError("Something went wrong while signing in.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleRegister(e: React.MouseEvent<HTMLButtonElement>) {
+    // Keep this in-form, but ensure it never submits the form
+    e.preventDefault();
+
+    setError(null);
+
+    const emailNormalised = normalisedEmail(email);
+    const pw = password;
+
+    if (!emailNormalised || !pw) {
+      goRegisterDenied();
       return;
     }
 
-    if (result.error) {
-      setError(result.error);
-      return;
+    setSubmitting(true);
+
+    try {
+      // 1) Check admin status (no session creation)
+      const r = await fetch("/api/auth/admin-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: emailNormalised, password: pw }),
+      });
+
+      if (!r.ok) {
+        goRegisterDenied();
+        return;
+      }
+
+      const data = (await r.json()) as { ok: boolean; isAdmin: boolean };
+
+      if (!(data.ok && data.isAdmin)) {
+        goRegisterDenied();
+        return;
+      }
+
+      // 2) Create a real NextAuth session (required for /account/add-user)
+      const signInRes = await signIn("credentials", {
+        redirect: false,
+        email: emailNormalised,
+        password: pw,
+      });
+
+      if (!signInRes?.ok) {
+        goRegisterDenied();
+        return;
+      }
+
+      // 3) Now authenticated, go to Add user page
+      window.location.assign("/account/add-user");
+    } catch {
+      goRegisterDenied();
+    } finally {
+      setSubmitting(false);
     }
-
-    // Success: decide where to send the user
-    if (requestedCallbackUrl) {
-      // If we came here because a protected page sent us, honour that
-      router.push(requestedCallbackUrl);
-      return;
-    }
-
-    // Otherwise: use role-based landing, falling back to defaultRedirect
-    const freshSession = await getSession();
-    const roleKeys =
-      (freshSession?.user as any)?.roleKeys as string[] | undefined;
-
-    const roleTarget = getRoleBasedRedirect(roleKeys);
-    const finalUrl = roleTarget ?? defaultRedirect ?? "/";
-
-    router.push(finalUrl);
   }
 
   return (
-    <section className="signin-section" aria-label="Sign in form">
-      <h2 className="signin-heading">Sign in</h2>
-
-      <form onSubmit={handleSubmit} className="signin-form">
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        )}
-
-        <div className="form-group">
-          <label htmlFor="signin-email">Email address</label>
+    <section className="auth-card">
+      <form className="auth-form" onSubmit={handleSignIn}>
+        <div className="auth-field">
+          <label className="auth-label" htmlFor="email">
+            Email
+          </label>
           <input
-            id="signin-email"
+            className="auth-input"
+            id="email"
             name="email"
             type="email"
             autoComplete="email"
             required
-            disabled={submitting}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
         </div>
 
-        <div className="form-group">
-          <label htmlFor="signin-password">Password</label>
+        <div className="auth-field">
+          <label className="auth-label" htmlFor="password">
+            Password
+          </label>
           <input
-            id="signin-password"
+            className="auth-input"
+            id="password"
             name="password"
             type="password"
             autoComplete="current-password"
             required
-            disabled={submitting}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
         </div>
 
-        <button
-          type="submit"
-          className="primary-button"
-          disabled={submitting}
-        >
-          {submitting ? "Signing in..." : "Sign in"}
-        </button>
+        {error && (
+          <p role="alert" className="small">
+            {error}
+          </p>
+        )}
+
+        <div className="auth-actions">
+          <button
+            type="submit"
+            className="button-link button-link--primary"
+            disabled={submitting}
+          >
+            {submitting ? "Working…" : "Sign in"}
+          </button>
+
+          <button
+            type="button"
+            className="auth-linklike"
+            aria-disabled="true"
+            disabled
+          >
+            Forgot password?
+          </button>
+
+          <span className="tooltip-wrap">
+            <button
+              type="button"
+              className="button-link button-link--secondary"
+              onClick={handleRegister}
+              disabled={submitting}
+              title={registerHelp}
+              aria-describedby={helpId}
+            >
+              Register
+            </button>
+
+            {/* Help text for screen readers */}
+            <span id={helpId} className="sr-only">
+              {registerHelp}
+            </span>
+
+            {/* Visual help on hover OR keyboard focus */}
+            <span className="tooltip-bubble" aria-hidden="true">
+              {registerHelp}
+            </span>
+          </span>
+        </div>
+
+        {/* Show the bubble on hover OR focus-within */}
+        <style jsx>{`
+          .tooltip-bubble {
+            display: none;
+          }
+          .tooltip-wrap:hover .tooltip-bubble,
+          .tooltip-wrap:focus-within .tooltip-bubble {
+            display: block;
+          }
+        `}</style>
       </form>
     </section>
   );

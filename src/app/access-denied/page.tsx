@@ -144,6 +144,23 @@ if (!appLabel || appLabel === appLabelFallback) {
   let heading = "Access denied";
   let body: JSX.Element;
 
+if (reason === "register-admin-only") {
+  heading = "Register – admin access required";
+  body = (
+    <>
+      <p>
+        You selected <strong>Register</strong>, but this option is currently
+        restricted to <strong>admins</strong> for adding new users.
+      </p>
+      <p>
+        To continue, sign in using an admin account and select{" "}
+        <strong>Add user</strong> from the Account menu, or contact the
+        Alliances Team if you believe you should have admin access.
+      </p>
+    </>
+  );
+}
+
   if (reason === "student-view-role") {
     heading = "Student view – role restricted";
     body = (
