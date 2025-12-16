@@ -124,44 +124,68 @@ img {
   border-bottom: 1px solid var(--line);
 }
 
+/* Banner top: keep logo + ALLIANCES as one ribbon; announcement may drop below */
 .banner-top {
   display: grid;
-  grid-template-columns: auto auto 1fr;
+  grid-template-columns: auto max-content 1fr;
+  grid-template-areas: "logo team announce";
   align-items: center;
-  gap: 1.5rem; /* more space between logo and ALLIANCES */
+  gap: 1.5rem;
   max-width: 1100px;
   margin: 0 auto;
   padding: 0.75rem 1rem;
 }
 
+.logo {
+  grid-area: logo;
+}
+
+.team-name {
+  grid-area: team;
+  white-space: nowrap; /* prevent wrapping under logo */
+}
+
+/* Announcement stays on the right */
+.announce-wrap {
+  grid-area: announce;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* On narrower screens: keep logo+team on row 1, move announcement to row 2 */
+@media (max-width: 900px) {
+  .banner-top {
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      "logo team"
+      "announce announce";
+  }
+
+  /* If you still want ALLIANCES hidden on small screens, keep this.
+     If you want it visible, remove this block. */
+  /* .team-name { display: none; } */
+}
+
 .logo img {
   height: 40px;
   width: auto;
+  display: block;
 }
 
-/* Make team name match logo height */
 .team-name {
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-
   font-size: 40px;
-  line-height: 1;
-}
-
-/* Announcement: right aligned, noticeboard style */
-.announce-wrap {
+  line-height: 40px;
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
 }
 
 .lcd-announcement {
   display: inline-flex;
   flex-direction: column;
-  align-items: flex-end;
+    align-items: center;     /* centre CTA under text */
   justify-content: center;
   gap: 0.5rem;
-  text-align: right;
+    text-align: center;      /* centre text + button inside */
 
   padding: 0.6rem 0.8rem;
   background: var(--ucl-azure);
@@ -179,7 +203,7 @@ img {
 }
 
 .lcd-cta {
-  align-self: flex-end;
+    align-self: center;
   display: inline-flex;
   width: auto;
 }
@@ -222,9 +246,7 @@ img {
   text-decoration: none;
 }
 
-/* Dropdown affordance */
-.nav-item.has-submenu .menu-button::after {
-  content: "▾";
+.menu-caret {
   display: inline-block;
   margin-left: 0.5rem;
   font-size: 0.9em;

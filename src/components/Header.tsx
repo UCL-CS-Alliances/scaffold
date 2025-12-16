@@ -73,7 +73,7 @@ const isAdmin = roleKeys.includes("ADMIN");
           className="logo"
           href="https://www.ucl.ac.uk/engineering/computer-science"
         >
-          <img
+          <img 
             src="/images/UCL-Computer-Science-logo.jpg"
             alt="UCL Computer Science"
           />
@@ -125,7 +125,7 @@ const isAdmin = roleKeys.includes("ADMIN");
                 aria-controls="menu-students"
                 onClick={() => toggleMenu("students")}
               >
-                For students
+                For students <span aria-hidden="true" className="menu-caret">▾</span>
               </button>
               <ul
                 className="menu-panel"
@@ -178,7 +178,7 @@ const isAdmin = roleKeys.includes("ADMIN");
                 aria-controls="menu-researchers"
                 onClick={() => toggleMenu("researchers")}
               >
-                For researchers
+                For researchers <span aria-hidden="true" className="menu-caret">▾</span>
               </button>
               <ul
                 className="menu-panel"
@@ -231,7 +231,7 @@ const isAdmin = roleKeys.includes("ADMIN");
                 aria-controls="menu-partners"
                 onClick={() => toggleMenu("partners")}
               >
-                For partners
+                For partners <span aria-hidden="true" className="menu-caret">▾</span>
               </button>
               <ul
                 className="menu-panel"
@@ -285,7 +285,7 @@ const isAdmin = roleKeys.includes("ADMIN");
                   aria-controls="menu-account"
                   onClick={() => toggleMenu("account")}
                 >
-                  Account
+                  Account <span aria-hidden="true" className="menu-caret">▾</span>
                 </button>
                 <ul
                   className="menu-panel"
