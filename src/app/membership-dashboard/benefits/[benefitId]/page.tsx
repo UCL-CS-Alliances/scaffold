@@ -198,6 +198,7 @@ export default async function BenefitPage({ params }: PageProps) {
                         className="button-link button-link--primary"
                         disabled
                         aria-disabled="true"
+title="This action will be enabled in a future release."
                         style={{ marginTop: "0.5rem" }}
                       >
                         Redeem benefit now
@@ -225,6 +226,7 @@ export default async function BenefitPage({ params }: PageProps) {
                         className="button-link button-link--primary"
                         disabled
                         aria-disabled="true"
+title="This action will be enabled in a future release."
                         style={{ marginTop: "0.5rem" }}
                       >
                         Launch partner satisfaction survey

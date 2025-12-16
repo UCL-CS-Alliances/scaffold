@@ -138,7 +138,7 @@ export const services: Service[] = [
     relatedServiceSlugs: ["learning-hub", "executive-education"],
     showInNav: true,
     navActive: false,
-    spotlight: true,
+    spotlight: false,
   },
 
   // --- Learning Hub ---

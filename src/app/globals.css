@@ -356,12 +356,13 @@ img {
   max-width: 60ch;
 }
 
-/* Benefit detail page: allow full-width description */
-.benefit-detail-description {
+/* Benefit detail page: allow description to span full width */
+.content-header .benefit-detail-description {
   max-width: none;
   width: 100%;
-  text-align: left;
 }
+
+
 
 /* ------------------------------------------------------------
    Footer
@@ -508,7 +509,6 @@ img {
 .button-link[aria-disabled="true"] {
   opacity: 0.65;
   cursor: not-allowed;
-  pointer-events: none;
 }
 
 /* ------------------------------------------------------------
@@ -931,4 +931,107 @@ article.pathway hr {
 
 .tooltip-bubble[hidden] {
   display: none;
+}
+
+/* --- Benefits filter toolbar: visual styling (no behaviour changes) --- */
+
+.benefits-filter-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Make the toolbar feel like a contained control group */
+.benefits-filter-toolbar {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+
+  /* spacing so buttons don’t touch */
+  gap: 0.6rem;
+
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--ucl-sky);
+}
+
+/* Base toggle button style (looks like an actual control) */
+.filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ucl-ink-2);
+
+  font-weight: 600;
+  line-height: 1.2;
+
+  cursor: pointer;
+}
+
+/* Hover/focus */
+.filter-toggle:hover,
+.filter-toggle:focus {
+  background: var(--ucl-azure);
+  text-decoration: none;
+  outline: 2px solid transparent;
+}
+
+/* Active state indicator (clear, not colour-only) */
+.filter-toggle.is-on {
+  border-color: var(--ucl-blue);
+  box-shadow: 0 0 0 2px rgba(0, 91, 187, 0.18);
+}
+
+/* Add a small “selected” marker so the state is obvious */
+.filter-toggle.is-on::before {
+  content: "✓";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 1.1rem;
+  height: 1.1rem;
+
+  border-radius: 999px;
+  background: var(--ucl-blue);
+  color: #fff;
+
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+/* Clear filter button: visually secondary, still button-like */
+.filter-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ucl-blue);
+
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.filter-clear:hover,
+.filter-clear:focus {
+  background: #fff;
+  text-decoration: none;
+  outline: 2px solid transparent;
+}
+
+.filter-clear[disabled],
+.filter-clear[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
 }

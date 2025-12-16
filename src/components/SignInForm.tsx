@@ -171,28 +171,15 @@ export default function SignInForm({ defaultRedirect }: SignInFormProps) {
             Forgot password?
           </button>
 
-          <span className="tooltip-wrap">
             <button
               type="button"
               className="button-link button-link--secondary"
               onClick={handleRegister}
               disabled={submitting}
               title={registerHelp}
-              aria-describedby={helpId}
             >
               Register
             </button>
-
-            {/* Help text for screen readers */}
-            <span id={helpId} className="sr-only">
-              {registerHelp}
-            </span>
-
-            {/* Visual help on hover OR keyboard focus */}
-            <span className="tooltip-bubble" aria-hidden="true">
-              {registerHelp}
-            </span>
-          </span>
         </div>
 
         {/* Show the bubble on hover OR focus-within */}
