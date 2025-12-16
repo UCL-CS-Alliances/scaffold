@@ -35,9 +35,10 @@ export default function UserProfileForm(props: {
   meId: string;
   targetUserId: string;
   meta?: Meta; // only passed for admin mode
-    initialSelf?: { id: string; email: string; firstName: string; lastName: string };
+  initialSelf?: { id: string; email: string; firstName: string; lastName: string };
+  initialTempPassword?: string; // only used when redirecting from add-user flow
 }) {
-  const { mode, meId, targetUserId, meta, initialSelf } = props;
+  const { mode, meId, targetUserId, meta, initialSelf, initialTempPassword } = props;
 
   const isAdmin = mode === "admin-edit";
   const editingSelf = targetUserId === meId;
@@ -65,12 +66,12 @@ export default function UserProfileForm(props: {
 
   // Single membership (admin-only)
   const [membershipTierId, setMembershipTierId] = useState<number | null>(null);
-  const [membershipStatus, setMembershipStatus] = useState<string>("");
+  const [membershipStatus, setMembershipStatus] = useState<string>("active");
   const [membershipManagerName, setMembershipManagerName] = useState<string>("");
   const [membershipExpiryText, setMembershipExpiryText] = useState<string>(""); // dd/mm/yyyy
   const [membershipIsActive, setMembershipIsActive] = useState<boolean>(true);
 
-  // Read-only membership summary (shown to everyone)
+  // Membership summary (we will not show to non-admins per your request)
   const [membershipSummary, setMembershipSummary] = useState<null | {
     organisationName: string | null;
     tierLabel: string | null;
@@ -108,12 +109,7 @@ export default function UserProfileForm(props: {
   const [pendingSaveAfterDemoteConfirm, setPendingSaveAfterDemoteConfirm] = useState(false);
 
   const [resetBusy, setResetBusy] = useState(false);
-  const [tempPassword, setTempPassword] = useState<string | null>(null);
-
-  const title = useMemo(() => {
-    if (!isAdmin) return "Edit profile";
-    return editingSelf ? "Edit profile" : "Edit user profile";
-  }, [isAdmin, editingSelf]);
+  const [tempPassword, setTempPassword] = useState<string | null>(initialTempPassword ?? null);
 
   // Combined lists for admin UI
   const organisationOptions = useMemo(() => {
@@ -142,11 +138,28 @@ export default function UserProfileForm(props: {
     return [...dbMapped, ...pending];
   }, [meta, pendingRoles]);
 
+  // Resolve selected role keys (including pending role keys)
+  const selectedRoleKeys = useMemo(() => {
+    const out: string[] = [];
+    for (const c of roleChoices) {
+      if (c.kind === "existing") out.push(c.key);
+      if (c.kind === "pending") {
+        const pr = pendingRoles.find((r) => r.clientId === c.clientId);
+        if (pr?.key) out.push(pr.key);
+      }
+    }
+    return out;
+  }, [roleChoices, pendingRoles]);
+
+  const isMemberRoleSelected = useMemo(() => {
+    return isAdmin ? selectedRoleKeys.includes("MEMBER") : false;
+  }, [isAdmin, selectedRoleKeys]);
+
   // Is ADMIN role checked (in UI) — used for demotion confirmation
   const isAdminRoleChecked = useMemo(() => {
     if (!isAdmin) return false;
-    return roleChoices.some((c) => c.kind === "existing" && c.key === "ADMIN");
-  }, [isAdmin, roleChoices]);
+    return selectedRoleKeys.includes("ADMIN");
+  }, [isAdmin, selectedRoleKeys]);
 
   // Load data for target user
   useEffect(() => {
@@ -164,15 +177,19 @@ export default function UserProfileForm(props: {
         setFirstName(data.user.firstName ?? "");
         setLastName(data.user.lastName ?? "");
         setEmail(data.user.email ?? "");
+
+        // Keep summary in state (even if we don’t render it for non-admins)
         setMembershipSummary(data.membershipSummary ?? null);
 
         // Reset in-progress pending items when switching users (safer)
         setPendingOrgs([]);
         setPendingRoles([]);
-        setTempPassword(null);
         setPwCurrent("");
         setPwNext("");
         setPwMessage(null);
+
+        // When switching user, clear temp password (it belongs to the redirected user)
+        setTempPassword(initialTempPassword ?? null);
 
         if (isAdmin) {
           // existing organisation
@@ -190,7 +207,7 @@ export default function UserProfileForm(props: {
 
           // membership edit (single active)
           setMembershipTierId(data.membershipEdit?.membershipTierId ?? null);
-          setMembershipStatus(data.membershipEdit?.status ?? "");
+          setMembershipStatus((data.membershipEdit?.status ?? "active") || "active");
           setMembershipManagerName(data.membershipEdit?.managerName ?? "");
           setMembershipExpiryText(data.membershipEdit?.expiryText ?? "");
           setMembershipIsActive(data.membershipEdit?.isActive ?? true);
@@ -203,6 +220,7 @@ export default function UserProfileForm(props: {
     }
 
     void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetUserId, isAdmin]);
 
   function roleChecked(optionKey: string) {
@@ -413,13 +431,21 @@ export default function UserProfileForm(props: {
             organisations: pendingOrgs,
             roles: pendingRoles,
           },
-          membership: {
-            membershipTierId,
-            status: membershipStatus.trim() || null,
-            managerName: membershipManagerName.trim() || null,
-            expiryText: membershipExpiryText.trim() || null,
-            isActive: Boolean(membershipIsActive),
-          },
+          membership: isMemberRoleSelected
+            ? {
+                membershipTierId,
+                status: (membershipStatus || "active").trim() || "active",
+                managerName: membershipManagerName.trim() || null,
+                expiryText: membershipExpiryText.trim() || null,
+                isActive: Boolean(membershipIsActive),
+              }
+            : {
+                membershipTierId: null,
+                status: null,
+                managerName: null,
+                expiryText: null,
+                isActive: true,
+              },
         };
       }
 
@@ -481,245 +507,213 @@ export default function UserProfileForm(props: {
 
   return (
     <section className="auth-card">
-      <header>
-        <h2 style={{ marginTop: 0 }}>{title}</h2>
-        <p className="small" style={{ marginTop: "0.25rem" }}>
-          Email changes are validated and must be unique.
-        </p>
-      </header>
-
       <div className="stack" style={{ ["--stack-gap" as any]: "0.85rem" }}>
-        {/* Edit profile (common) */}
-        <div className="auth-field">
-          <label className="auth-label" htmlFor="firstName">
-            First name
-          </label>
-          <input
-            className="auth-input"
-            id="firstName"
-            value={firstName}
-            onChange={(e) => setFirstName(e.target.value)}
-            required
-          />
-        </div>
+        {/* Fundamentals */}
+        <div className="tile" style={{ padding: "0.95rem" }}>
+          <h2 style={{ marginTop: 0 }}>Fundamentals</h2>
 
-        <div className="auth-field">
-          <label className="auth-label" htmlFor="lastName">
-            Last name
-          </label>
-          <input
-            className="auth-input"
-            id="lastName"
-            value={lastName}
-            onChange={(e) => setLastName(e.target.value)}
-            required
-          />
-        </div>
+          <div className="stack" style={{ ["--stack-gap" as any]: "0.85rem" }}>
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="firstName">
+                First name
+              </label>
+              <input
+                className="auth-input"
+                id="firstName"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                required
+              />
+            </div>
 
-        <div className="auth-field">
-          <label className="auth-label" htmlFor="email">
-            Email
-          </label>
-          <input
-            className="auth-input"
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-        </div>
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="lastName">
+                Last name
+              </label>
+              <input
+                className="auth-input"
+                id="lastName"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                required
+              />
+            </div>
 
-        {/* Membership summary (static for everyone) */}
-        {membershipSummary && (
-          <div className="tile" style={{ padding: "0.85rem" }}>
-            <h3 style={{ marginTop: 0 }}>Membership summary</h3>
-            <dl className="membership-meta">
-              <div>
-                <dt>Organisation</dt>
-                <dd>{membershipSummary.organisationName ?? "—"}</dd>
-              </div>
-              <div>
-                <dt>Tier</dt>
-                <dd>{membershipSummary.tierLabel ?? "—"}</dd>
-              </div>
-              <div>
-                <dt>Status</dt>
-                <dd>{membershipSummary.status ?? "—"}</dd>
-              </div>
-              <div>
-                <dt>Expiry</dt>
-                <dd>{membershipSummary.expiryText ?? "—"}</dd>
-              </div>
-              <div>
-                <dt>Account manager</dt>
-                <dd>{membershipSummary.managerName ?? "—"}</dd>
-              </div>
-            </dl>
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="email">
+                Email
+              </label>
+              <input
+                className="auth-input"
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+
+            {/* Admin fundamentals: Organisation + Roles */}
+            {isAdmin && meta && (
+              <>
+                <div className="auth-field">
+                  <label className="auth-label" htmlFor="org">
+                    Organisation
+                  </label>
+                  <div className="cluster" style={{ alignItems: "center" }}>
+                    <select
+                      id="org"
+                      className="auth-input"
+                      value={
+                        organisationChoice
+                          ? organisationChoice.kind === "existing"
+                            ? `existing:${organisationChoice.id}`
+                            : `pending:${organisationChoice.clientId}`
+                          : ""
+                      }
+                      onChange={(e) => setOrganisationFromOption(e.target.value)}
+                    >
+                      <option value="">—</option>
+                      {organisationOptions.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button type="button" className="button-link" onClick={openAddOrg}>
+                      Add
+                    </button>
+                  </div>
+                </div>
+
+                <div className="auth-field">
+                  <div className="cluster" style={{ justifyContent: "space-between" }}>
+                    <span className="auth-label">Roles</span>
+                    <button type="button" className="button-link" onClick={openAddRole}>
+                      Add role
+                    </button>
+                  </div>
+
+                  <div className="tile" style={{ padding: "0.75rem" }}>
+                    {roleOptions.map((r) => (
+                      <label
+                        key={r.key}
+                        style={{
+                          display: "flex",
+                          gap: "0.5rem",
+                          alignItems: "center",
+                          padding: "0.25rem 0",
+                        }}
+                      >
+                        <input type="checkbox" checked={roleChecked(r.key)} onChange={() => toggleRole(r.key)} />
+                        <span>{r.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
-        )}
+        </div>
 
-        {/* Additional information (admin-only) */}
-        {isAdmin && meta && (
-          <div className="tile tile--gradient" style={{ padding: "0.95rem" }}>
-            <h3 style={{ marginTop: 0 }}>Additional information</h3>
+        {/* Membership settings (admin-only, only if MEMBER role selected) */}
+        {isAdmin && meta && isMemberRoleSelected && (
+          <div className="tile" style={{ padding: "0.95rem" }}>
+            <h3 style={{ marginTop: 0 }}>Membership</h3>
             <p className="small" style={{ marginTop: "0.25rem" }}>
-              Admin-only fields that affect access rules and routing.
+              This section is available when the MEMBER role is selected.
             </p>
 
             <div className="stack" style={{ ["--stack-gap" as any]: "0.85rem" }}>
-              {/* Organisation */}
               <div className="auth-field">
-                <label className="auth-label" htmlFor="org">
-                  Organisation
-                </label>
-                <div className="cluster" style={{ alignItems: "center" }}>
-                  <select
-                    id="org"
-                    className="auth-input"
-                    value={
-                      organisationChoice
-                        ? organisationChoice.kind === "existing"
-                          ? `existing:${organisationChoice.id}`
-                          : `pending:${organisationChoice.clientId}`
-                        : ""
-                    }
-                    onChange={(e) => setOrganisationFromOption(e.target.value)}
-                  >
-                    <option value="">—</option>
-                    {organisationOptions.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-
-                  <button type="button" className="button-link" onClick={openAddOrg}>
-                    Add
-                  </button>
-                </div>
-              </div>
-
-              {/* Roles */}
-              <div className="auth-field">
-                <div className="cluster" style={{ justifyContent: "space-between" }}>
-                  <span className="auth-label">Roles</span>
-                  <button type="button" className="button-link" onClick={openAddRole}>
-                    Add role
-                  </button>
-                </div>
-
-                <div className="tile" style={{ padding: "0.75rem" }}>
-                  {roleOptions.map((r) => (
-                    <label
-                      key={r.key}
-                      style={{
-                        display: "flex",
-                        gap: "0.5rem",
-                        alignItems: "center",
-                        padding: "0.25rem 0",
-                      }}
-                    >
-                      <input type="checkbox" checked={roleChecked(r.key)} onChange={() => toggleRole(r.key)} />
-                      <span>{r.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {/* Default app */}
-              <div className="auth-field">
-                <label className="auth-label" htmlFor="defaultApp">
-                  Default app
+                <label className="auth-label" htmlFor="tier">
+                  Membership tier
                 </label>
                 <select
-                  id="defaultApp"
+                  id="tier"
                   className="auth-input"
-                  value={defaultAppId ?? ""}
-                  onChange={(e) => setDefaultAppId(e.target.value ? Number(e.target.value) : null)}
+                  value={membershipTierId ?? ""}
+                  onChange={(e) => setMembershipTierId(e.target.value ? Number(e.target.value) : null)}
                 >
                   <option value="">—</option>
-                  {meta.apps.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} ({a.key})
+                  {meta.tiers.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label} ({t.key})
                     </option>
                   ))}
                 </select>
               </div>
 
-              {/* Membership (single) */}
-              <div className="tile" style={{ padding: "0.85rem" }}>
-                <h4 style={{ marginTop: 0 }}>Membership (single)</h4>
-
-                <div className="auth-field">
-                  <label className="auth-label" htmlFor="tier">
-                    Membership tier
-                  </label>
-                  <select
-                    id="tier"
-                    className="auth-input"
-                    value={membershipTierId ?? ""}
-                    onChange={(e) => setMembershipTierId(e.target.value ? Number(e.target.value) : null)}
-                  >
-                    <option value="">—</option>
-                    {meta.tiers.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.label} ({t.key})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="auth-field">
-                  <label className="auth-label" htmlFor="status">
-                    Status
-                  </label>
-                  <input
-                    id="status"
-                    className="auth-input"
-                    value={membershipStatus}
-                    onChange={(e) => setMembershipStatus(e.target.value)}
-                    placeholder="e.g. active"
-                  />
-                </div>
-
-                <div className="auth-field">
-                  <label className="auth-label" htmlFor="managerName">
-                    Account manager name
-                  </label>
-                  <input
-                    id="managerName"
-                    className="auth-input"
-                    value={membershipManagerName}
-                    onChange={(e) => setMembershipManagerName(e.target.value)}
-                    placeholder="Optional"
-                  />
-                </div>
-
-                <div className="auth-field">
-                  <label className="auth-label" htmlFor="expiry">
-                    Expiry (dd/mm/yyyy)
-                  </label>
-                  <input
-                    id="expiry"
-                    className="auth-input"
-                    value={membershipExpiryText}
-                    onChange={(e) => setMembershipExpiryText(e.target.value)}
-                    placeholder="dd/mm/yyyy"
-                    inputMode="numeric"
-                    pattern="\\d{2}/\\d{2}/\\d{4}"
-                    aria-describedby="expiryHint"
-                  />
-                  <span id="expiryHint" className="small">
-                    Enter a date in dd/mm/yyyy format (e.g., 31/01/2026).
-                  </span>
-                </div>
-
-                <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                  <input type="checkbox" checked={membershipIsActive} onChange={(e) => setMembershipIsActive(e.target.checked)} />
-                  <span>Membership is active</span>
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="managerName">
+                  Client experience manager
                 </label>
+                <input
+                  id="managerName"
+                  className="auth-input"
+                  value={membershipManagerName}
+                  onChange={(e) => setMembershipManagerName(e.target.value)}
+                  placeholder="Optional"
+                />
               </div>
+
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="expiry">
+                  Expiry (dd/mm/yyyy)
+                </label>
+                <input
+                  id="expiry"
+                  className="auth-input"
+                  value={membershipExpiryText}
+                  onChange={(e) => setMembershipExpiryText(e.target.value)}
+                  placeholder="dd/mm/yyyy"
+                  inputMode="numeric"
+                  pattern="\\d{2}/\\d{2}/\\d{4}"
+                  aria-describedby="expiryHint"
+                />
+                <span id="expiryHint" className="small">
+                  Enter a date in dd/mm/yyyy format (e.g., 31/01/2026).
+                </span>
+              </div>
+
+              <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={membershipIsActive}
+                  onChange={(e) => setMembershipIsActive(e.target.checked)}
+                />
+                <span>Membership is active</span>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {/* Advanced settings (admin-only) */}
+        {isAdmin && meta && (
+          <div className="tile tile--gradient" style={{ padding: "0.95rem" }}>
+            <h3 style={{ marginTop: 0 }}>Advanced settings</h3>
+            <p className="small" style={{ marginTop: "0.25rem" }}>
+              Admin-only fields that affect routing and defaults.
+            </p>
+
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="defaultApp">
+                Default app
+              </label>
+              <select
+                id="defaultApp"
+                className="auth-input"
+                value={defaultAppId ?? ""}
+                onChange={(e) => setDefaultAppId(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">—</option>
+                {meta.apps.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.key})
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         )}
@@ -802,50 +796,85 @@ export default function UserProfileForm(props: {
             <div className="stack" style={{ ["--stack-gap" as any]: "0.85rem", marginTop: "1rem" }}>
               <h4 style={{ margin: "0.25rem 0" }}>Admin actions</h4>
 
+              {/* Password section with Reset + Copy */}
               <div className="tile" style={{ padding: "0.75rem" }}>
                 <div className="cluster" style={{ justifyContent: "space-between", alignItems: "center" }}>
                   <div>
-                    <strong>Reset password</strong>
+                    <strong>Temporary password</strong>
                     <p className="small" style={{ margin: 0 }}>
-                      Generates a temporary password and stores it as a hashed value.
+                      Generate a new temporary password for this user.
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    className="button-link button-link--primary"
-                    onClick={() => void resetPasswordForOtherUser()}
-                    disabled={resetBusy}
-                  >
-                    {resetBusy ? "Working…" : "Generate"}
-                  </button>
+                  <div className="cluster" style={{ gap: "0.5rem" }}>
+                    <button
+                      type="button"
+                      className="button-link"
+                      onClick={() => void copyTempPassword()}
+                      disabled={!tempPassword}
+                      aria-disabled={!tempPassword}
+                    >
+                      Copy
+                    </button>
+
+                    <button
+                      type="button"
+                      className="button-link button-link--primary"
+                      onClick={() => void resetPasswordForOtherUser()}
+                      disabled={resetBusy}
+                    >
+                      {resetBusy ? "Working…" : "Reset"}
+                    </button>
+                  </div>
                 </div>
 
-                {tempPassword && (
+                {tempPassword ? (
                   <div className="tile" style={{ padding: "0.75rem", marginTop: "0.75rem" }}>
                     <p style={{ marginTop: 0 }}>
                       <strong>Temporary password:</strong>{" "}
                       <span style={{ fontFamily: "var(--font-mono, monospace)" }}>{tempPassword}</span>
                     </p>
-                    <button type="button" className="button-link" onClick={() => void copyTempPassword()}>
-                      Copy to clipboard
-                    </button>
                   </div>
+                ) : (
+                  <p className="small" style={{ marginTop: "0.75rem" }}>
+                    No temporary password available yet. Use Reset to generate one.
+                  </p>
                 )}
               </div>
 
-              <div className="cluster" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              {/* Suspend section (wired to membership.status) */}
+              <div className="tile" style={{ padding: "0.75rem" }}>
                 <div>
                   <strong>Suspend account</strong>
                   <p className="small" style={{ margin: 0 }}>
-                    Coming soon.
+                    This sets the membership status field (for MEMBER users).
                   </p>
                 </div>
-                <button type="button" className="button-link" aria-disabled="true" disabled>
-                  Suspend (disabled)
-                </button>
+
+                <div className="auth-field" style={{ marginTop: "0.75rem" }}>
+                  <label className="auth-label" htmlFor="suspendStatus">
+                    Status
+                  </label>
+                  <select
+                    id="suspendStatus"
+                    className="auth-input"
+                    value={membershipStatus || "active"}
+                    onChange={(e) => setMembershipStatus(e.target.value)}
+                    disabled={!isMemberRoleSelected}
+                    aria-disabled={!isMemberRoleSelected}
+                  >
+                    <option value="active">Active</option>
+                    <option value="suspended">Suspended</option>
+                  </select>
+                  {!isMemberRoleSelected && (
+                    <p className="small" style={{ margin: 0 }}>
+                      Enable the MEMBER role to manage membership status.
+                    </p>
+                  )}
+                </div>
               </div>
 
+              {/* Delete */}
               <div className="cluster" style={{ justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <strong>Delete account</strong>
@@ -943,111 +972,123 @@ export default function UserProfileForm(props: {
         onClose={() => setDeleteOpen(false)}
         initialFocusSelector='button[data-autofocus="true"]'
       >
-        <p>{editingSelf ? "Are you sure you want to delete your account?" : "Are you sure you want to delete this user account?"}</p>
+        <p>
+          {editingSelf ? "Are you sure you want to delete your account?" : "Are you sure you want to delete this user account?"}
+        </p>
 
         <div className="auth-actions" style={{ marginTop: "0.75rem" }}>
           <button type="button" className="button-link" onClick={() => setDeleteOpen(false)}>
             Cancel
           </button>
+
           <button
             type="button"
-            className="button-link button-link--primary"
+            className="button-link button-link--secondary"
             data-autofocus="true"
             onClick={() => void deleteAccountOrUser()}
             disabled={deleteBusy}
           >
-            {deleteBusy ? "Deleting…" : "I confirm, delete"}
+            {deleteBusy ? "Working…" : "Confirm delete"}
           </button>
         </div>
       </Modal>
 
-      {/* Pending-only modals (no DB writes) */}
-      {orgModalOpen && (
-        <Modal title="Add organisation" isOpen={orgModalOpen} onClose={() => setOrgModalOpen(false)} initialFocusSelector="#newOrgName">
-          <div className="stack" style={{ ["--stack-gap" as any]: "0.75rem" }}>
-            <div className="auth-field">
-              <label className="auth-label" htmlFor="newOrgName">
-                Organisation name
-              </label>
-              <input
-                id="newOrgName"
-                className="auth-input"
-                value={orgModalName}
-                onChange={(e) => setOrgModalName(e.target.value)}
-              />
-            </div>
-
-            <div className="auth-field">
-              <label className="auth-label" htmlFor="newOrgType">
-                Type
-              </label>
-              <select
-                id="newOrgType"
-                className="auth-input"
-                value={orgModalType}
-                onChange={(e) => setOrgModalType(e.target.value as PendingOrg["type"])}
-              >
-                <option value="UNIVERSITY">UNIVERSITY</option>
-                <option value="INDUSTRY">INDUSTRY</option>
-                <option value="OTHER">OTHER</option>
-              </select>
-            </div>
-
-            <div className="auth-actions">
-              <button type="button" className="button-link" onClick={() => setOrgModalOpen(false)}>
-                Cancel
-              </button>
-              <button type="button" className="button-link button-link--primary" onClick={confirmAddOrg}>
-                Add
-              </button>
-            </div>
+      {/* Add organisation modal */}
+      <Modal
+        title="Add organisation"
+        description="Create a new organisation and select it."
+        isOpen={orgModalOpen}
+        onClose={() => setOrgModalOpen(false)}
+        initialFocusSelector="#orgName"
+      >
+        <div className="stack" style={{ ["--stack-gap" as any]: "0.75rem" }}>
+          <div className="auth-field">
+            <label className="auth-label" htmlFor="orgName">
+              Organisation name
+            </label>
+            <input
+              id="orgName"
+              className="auth-input"
+              value={orgModalName}
+              onChange={(e) => setOrgModalName(e.target.value)}
+            />
           </div>
-        </Modal>
-      )}
 
-      {roleModalOpen && (
-        <Modal title="Add role" isOpen={roleModalOpen} onClose={() => setRoleModalOpen(false)} initialFocusSelector="#newRoleKey">
-          <div className="stack" style={{ ["--stack-gap" as any]: "0.75rem" }}>
-            <div className="auth-field">
-              <label className="auth-label" htmlFor="newRoleKey">
-                Role key
-              </label>
-              <input
-                id="newRoleKey"
-                className="auth-input"
-                value={roleModalKey}
-                onChange={(e) => setRoleModalKey(e.target.value)}
-                placeholder="e.g. ADMIN"
-              />
-              <p className="small" style={{ margin: 0 }}>
-                Uppercase letters, numbers, and underscores recommended.
-              </p>
-            </div>
-
-            <div className="auth-field">
-              <label className="auth-label" htmlFor="newRoleLabel">
-                Role label
-              </label>
-              <input
-                id="newRoleLabel"
-                className="auth-input"
-                value={roleModalLabel}
-                onChange={(e) => setRoleModalLabel(e.target.value)}
-                placeholder="e.g. Administrator"
-              />
-            </div>
-
-            <div className="auth-actions">
-              <button type="button" className="button-link" onClick={() => setRoleModalOpen(false)}>
-                Cancel
-              </button>
-              <button type="button" className="button-link button-link--primary" onClick={confirmAddRole}>
-                Add
-              </button>
-            </div>
+          <div className="auth-field">
+            <label className="auth-label" htmlFor="orgType">
+              Type
+            </label>
+            <select
+              id="orgType"
+              className="auth-input"
+              value={orgModalType}
+              onChange={(e) => setOrgModalType(e.target.value as PendingOrg["type"])}
+            >
+              <option value="INDUSTRY">Industry</option>
+              <option value="UNIVERSITY">University</option>
+              <option value="OTHER">Other</option>
+            </select>
           </div>
-        </Modal>
-      )}
+
+          <div className="auth-actions">
+            <button type="button" className="button-link" onClick={() => setOrgModalOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="button-link button-link--primary" onClick={confirmAddOrg}>
+              Add organisation
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Add role modal */}
+      <Modal
+        title="Add role"
+        description="Create a new role and select it."
+        isOpen={roleModalOpen}
+        onClose={() => setRoleModalOpen(false)}
+        initialFocusSelector="#roleKey"
+      >
+        <div className="stack" style={{ ["--stack-gap" as any]: "0.75rem" }}>
+          <div className="auth-field">
+            <label className="auth-label" htmlFor="roleKey">
+              Role key
+            </label>
+            <input
+              id="roleKey"
+              className="auth-input"
+              value={roleModalKey}
+              onChange={(e) => setRoleModalKey(e.target.value)}
+              placeholder="e.g. MEMBER"
+            />
+            <p className="small" style={{ margin: 0 }}>
+              Use uppercase letters, numbers, and underscores.
+            </p>
+          </div>
+
+          <div className="auth-field">
+            <label className="auth-label" htmlFor="roleLabel">
+              Role label
+            </label>
+            <input
+              id="roleLabel"
+              className="auth-input"
+              value={roleModalLabel}
+              onChange={(e) => setRoleModalLabel(e.target.value)}
+              placeholder="e.g. Member"
+            />
+          </div>
+
+          <div className="auth-actions">
+            <button type="button" className="button-link" onClick={() => setRoleModalOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="button-link button-link--primary" onClick={confirmAddRole}>
+              Add role
+            </button>
+          </div>
+        </div>
+      </Modal>
     </section>
   );
 }

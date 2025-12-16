@@ -6,6 +6,15 @@ import { getServerAuthSession } from "@/lib/getServerAuthSession";
 
 export const dynamic = "force-dynamic";
 
+function generateTempPassword(len = 10) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let out = "";
+  for (let i = 0; i < len; i++) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return out;
+}
+
 export async function POST(req: Request) {
   const session = await getServerAuthSession();
   const user = session?.user as any | undefined;
@@ -13,46 +22,45 @@ export async function POST(req: Request) {
   const isAdmin = roleKeys.includes("ADMIN");
 
   if (!isAdmin) {
-    return NextResponse.json(
-      { ok: false, error: "Admin access required." },
-      { status: 403 },
-    );
+    return NextResponse.json({ ok: false, error: "Admin access required." }, { status: 403 });
   }
 
   const body = (await req.json()) as {
     email?: string;
     firstName?: string;
     lastName?: string;
-    password?: string;
   };
 
   const email = (body.email ?? "").trim().toLowerCase();
   const firstName = (body.firstName ?? "").trim();
   const lastName = (body.lastName ?? "").trim();
-  const password = body.password ?? "";
 
-  if (!email || !firstName || !lastName || !password) {
+  if (!email || !firstName || !lastName) {
     return NextResponse.json(
-      { ok: false, error: "Email, first name, last name, and password are required." },
+      { ok: false, error: "Email, first name, and last name are required." },
       { status: 400 },
     );
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
+  const tempPassword = generateTempPassword(10);
+  const passwordHash = await bcrypt.hash(tempPassword, 12);
 
   try {
-    await prisma.user.create({
+    const created = await prisma.user.create({
       data: {
         email,
         firstName,
         lastName,
         passwordHash,
       },
+      select: { id: true },
     });
 
-    return NextResponse.json({ ok: true }, { status: 200 });
+    return NextResponse.json(
+      { ok: true, userId: created.id, tempPassword },
+      { status: 200 },
+    );
   } catch (e: any) {
-    // likely unique email violation
     return NextResponse.json(
       { ok: false, error: "Could not create user. Email may already exist." },
       { status: 400 },

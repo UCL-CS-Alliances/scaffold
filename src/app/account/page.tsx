@@ -4,7 +4,16 @@ import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import prisma from "@/lib/prisma";
 import AccountPageClient from "./ui/AccountPageClient";
 
-export default async function AccountPage() {
+type AccountPageProps = {
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
+};
+
+function pickFirst(value: string | string[] | undefined): string | undefined {
+  if (!value) return undefined;
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function AccountPage(props: AccountPageProps) {
   const session = await getServerAuthSession();
   const sessionUser = session?.user as any | undefined;
 
@@ -34,7 +43,11 @@ export default async function AccountPage() {
   const roleKeys: string[] = sessionUser.roleKeys ?? [];
   const isAdmin = roleKeys.includes("ADMIN");
 
-  // Admin-only data for selector + additional info section
+  const sp = props.searchParams ? await props.searchParams : undefined;
+
+  const requestedUserId = pickFirst(sp?.userId);
+  const tempPassword = pickFirst(sp?.tempPassword);
+
   const [users, meta] = isAdmin
     ? await Promise.all([
         prisma.user.findMany({
@@ -72,6 +85,8 @@ export default async function AccountPage() {
       ])
     : [null, null];
 
+  const initialSelectedUserId = isAdmin && requestedUserId ? requestedUserId : me.id;
+
   return (
     <section className="content-section">
       <header className="content-header">
@@ -82,6 +97,8 @@ export default async function AccountPage() {
       <AccountPageClient
         me={me}
         isAdmin={isAdmin}
+        initialSelectedUserId={initialSelectedUserId}
+        initialTempPassword={isAdmin ? tempPassword ?? null : null}
         adminData={
           isAdmin && users && meta
             ? {
