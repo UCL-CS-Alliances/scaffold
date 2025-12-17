@@ -11,8 +11,7 @@ export default function GeneralSignInPage() {
           Discovery, depending on your membership tier.
         </p>
       </header>
-
-      <SignInForm defaultRedirect="/membership-dashboard" />
+      <SignInForm defaultRedirect="/post-sign-in" />
     </section>
   );
 }

@@ -92,30 +92,37 @@ export default async function TalentDiscoveryPage(
   // ─────────────────────────────────────────
   // 4) App-level gate for partner views (Silver+)
   //    Applies to job-board, cv-library, and default entries
+  //
+  //    Admin bypass: admins can access all partner views regardless of tier.
   // ─────────────────────────────────────────
-  const canAccessApp = await userCanAccessApp(userId, "TALENT_DISCOVERY");
-  if (!canAccessApp) {
-    redirect(
-      "/access-denied?reason=access-denied&appKey=TALENT_DISCOVERY",
-    );
+  if (!hasAdminRole) {
+    const canAccessApp = await userCanAccessApp(userId, "TALENT_DISCOVERY");
+    if (!canAccessApp) {
+      redirect(
+        "/access-denied?reason=access-denied&appKey=TALENT_DISCOVERY",
+      );
+    }
   }
 
   // ─────────────────────────────────────────
   // 5) CV Library entry: requires Gold+ tier
+  //    Admin bypass: admin can always access.
   // ─────────────────────────────────────────
   if (view === "cv-library") {
-    if (
-      membershipTierRank == null ||
-      membershipTierRank < GOLD_RANK ||
-      !hasMemberRole
-    ) {
-      // Member below Gold, or not a member at all
-      redirect(
-        "/access-denied?reason=cv-library-tier&appKey=TALENT_DISCOVERY",
-      );
+    if (!hasAdminRole) {
+      if (
+        membershipTierRank == null ||
+        membershipTierRank < GOLD_RANK ||
+        !hasMemberRole
+      ) {
+        // Member below Gold, or not a member at all
+        redirect(
+          "/access-denied?reason=cv-library-tier&appKey=TALENT_DISCOVERY",
+        );
+      }
     }
 
-    // Gold/Platinum member → full partner view (job board + CV Library)
+    // Gold/Platinum member OR admin → full partner view (job board + CV Library)
     return (
       <TalentDiscoveryPartnerFullView
         title={copy.title}
@@ -126,7 +133,17 @@ export default async function TalentDiscoveryPage(
 
   // ─────────────────────────────────────────
   // 6) Job board or default entry for partners
+  //    Admin bypass: admin always sees full view (all partner capabilities).
   // ─────────────────────────────────────────
+  if (hasAdminRole) {
+    return (
+      <TalentDiscoveryPartnerFullView
+        title={copy.title}
+        description={copy.description}
+      />
+    );
+  }
+
   if (
     membershipTierRank != null &&
     membershipTierRank >= GOLD_RANK &&
