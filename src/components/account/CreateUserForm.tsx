@@ -18,12 +18,34 @@ type PendingOrg = {
 
 type PendingRole = {
   clientId: string;
-  key: string; // uppercased client-side
+  key: string; // GENERATED
   label: string;
 };
 
 function makeClientId(prefix: string) {
   return `${prefix}:pending:${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
+}
+
+/**
+ * Convert a human label into an uppercase ROLE_KEY with underscores.
+ * Examples:
+ *  - "Module leader" -> "MODULE_LEADER"
+ *  - "R&D lead" -> "R_D_LEAD"
+ *  - "  Senior  Lecturer " -> "SENIOR_LECTURER"
+ */
+function labelToRoleKey(label: string) {
+  const normalized = label
+    .trim()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, ""); // strip diacritics
+
+  const underscored = normalized
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_") // any run of non-alnum becomes underscore
+    .replace(/^_+|_+$/g, "") // trim underscores
+    .replace(/_+/g, "_"); // collapse
+
+  return underscored;
 }
 
 export default function CreateUserForm(props: { meta: Meta }) {
@@ -47,7 +69,7 @@ export default function CreateUserForm(props: { meta: Meta }) {
     Array<{ kind: "existing"; key: string } | { kind: "pending"; clientId: string }>
   >([]);
 
-  // Pending additions (created on save via update-user)
+  // Pending additions
   const [pendingOrgs, setPendingOrgs] = useState<PendingOrg[]>([]);
   const [pendingRoles, setPendingRoles] = useState<PendingRole[]>([]);
 
@@ -57,7 +79,6 @@ export default function CreateUserForm(props: { meta: Meta }) {
   const [orgModalType, setOrgModalType] = useState<PendingOrg["type"]>("INDUSTRY");
 
   const [roleModalOpen, setRoleModalOpen] = useState(false);
-  const [roleModalKey, setRoleModalKey] = useState("");
   const [roleModalLabel, setRoleModalLabel] = useState("");
 
   const organisationOptions = useMemo(() => {
@@ -147,15 +168,25 @@ export default function CreateUserForm(props: { meta: Meta }) {
   }
 
   function openAddRole() {
-    setRoleModalKey("");
     setRoleModalLabel("");
     setRoleModalOpen(true);
   }
 
   function confirmAddRole() {
-    const key = roleModalKey.trim().toUpperCase();
     const label = roleModalLabel.trim();
-    if (!key || !label) return;
+    if (!label) return;
+
+    const key = labelToRoleKey(label);
+    if (!key) return;
+
+    // Prevent duplicates against existing + pending keys
+    const existsInDb = meta.roles.some((r) => r.key === key);
+    const existsPending = pendingRoles.some((r) => r.key === key);
+    if (existsInDb || existsPending) {
+      setMessage(`Role "${label}" maps to key "${key}", which already exists.`);
+      setRoleModalOpen(false);
+      return;
+    }
 
     const clientId = makeClientId("role");
     const role: PendingRole = { clientId, key, label };
@@ -171,7 +202,6 @@ export default function CreateUserForm(props: { meta: Meta }) {
     setMessage(null);
 
     try {
-      // 1) Create user (server generates temp password)
       const r1 = await fetch("/api/account/create-user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -195,7 +225,6 @@ export default function CreateUserForm(props: { meta: Meta }) {
         return;
       }
 
-      // 2) Immediately set org/roles via update-user
       const r2 = await fetch("/api/account/update-user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -206,6 +235,7 @@ export default function CreateUserForm(props: { meta: Meta }) {
             firstName: firstName.trim(),
             lastName: lastName.trim(),
             email: email.trim().toLowerCase(),
+            defaultAppId: null,
           },
           admin: {
             organisationChoice,
@@ -215,7 +245,6 @@ export default function CreateUserForm(props: { meta: Meta }) {
               organisations: pendingOrgs,
               roles: pendingRoles,
             },
-            // no membership assignment on create (handled on edit page)
             membership: {
               membershipTierId: null,
               status: null,
@@ -233,12 +262,7 @@ export default function CreateUserForm(props: { meta: Meta }) {
         return;
       }
 
-      // 3) Redirect to edit profile with newly created user selected + temp password shown once
-      const qs = new URLSearchParams({
-        userId: newUserId,
-      });
-
-      // tempPassword can be empty if server chose not to return it for any reason
+      const qs = new URLSearchParams({ userId: newUserId });
       if (tempPassword) qs.set("tempPassword", tempPassword);
 
       router.push(`/account?${qs.toString()}`);
@@ -256,43 +280,23 @@ export default function CreateUserForm(props: { meta: Meta }) {
           <label className="auth-label" htmlFor="firstName">
             First name
           </label>
-          <input
-            className="auth-input"
-            id="firstName"
-            value={firstName}
-            onChange={(e) => setFirstName(e.target.value)}
-            required
-          />
+          <input className="auth-input" id="firstName" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
         </div>
 
         <div className="auth-field">
           <label className="auth-label" htmlFor="lastName">
             Last name
           </label>
-          <input
-            className="auth-input"
-            id="lastName"
-            value={lastName}
-            onChange={(e) => setLastName(e.target.value)}
-            required
-          />
+          <input className="auth-input" id="lastName" value={lastName} onChange={(e) => setLastName(e.target.value)} required />
         </div>
 
         <div className="auth-field">
           <label className="auth-label" htmlFor="email">
             Email
           </label>
-          <input
-            className="auth-input"
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
+          <input className="auth-input" id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         </div>
 
-        {/* Organisation */}
         <div className="auth-field">
           <label className="auth-label" htmlFor="org">
             Organisation
@@ -325,7 +329,6 @@ export default function CreateUserForm(props: { meta: Meta }) {
           </div>
         </div>
 
-        {/* Roles */}
         <div className="auth-field">
           <div className="cluster" style={{ justifyContent: "space-between" }}>
             <span className="auth-label">Roles</span>
@@ -336,10 +339,7 @@ export default function CreateUserForm(props: { meta: Meta }) {
 
           <div className="tile" style={{ padding: "0.75rem" }}>
             {roleOptions.map((r) => (
-              <label
-                key={r.key}
-                style={{ display: "flex", gap: "0.5rem", alignItems: "center", padding: "0.25rem 0" }}
-              >
+              <label key={r.key} style={{ display: "flex", gap: "0.5rem", alignItems: "center", padding: "0.25rem 0" }}>
                 <input type="checkbox" checked={roleChecked(r.key)} onChange={() => toggleRole(r.key)} />
                 <span>{r.label}</span>
               </label>
@@ -354,18 +354,12 @@ export default function CreateUserForm(props: { meta: Meta }) {
         )}
 
         <div className="auth-actions">
-          <button
-            type="button"
-            className="button-link button-link--primary"
-            onClick={() => void save()}
-            disabled={saving}
-          >
+          <button type="button" className="button-link button-link--primary" onClick={() => void save()} disabled={saving}>
             {saving ? "Saving…" : "Save and continue"}
           </button>
         </div>
       </div>
 
-      {/* Add organisation modal */}
       <Modal
         title="Add organisation"
         description="Create a new organisation and select it."
@@ -378,24 +372,14 @@ export default function CreateUserForm(props: { meta: Meta }) {
             <label className="auth-label" htmlFor="orgName">
               Organisation name
             </label>
-            <input
-              id="orgName"
-              className="auth-input"
-              value={orgModalName}
-              onChange={(e) => setOrgModalName(e.target.value)}
-            />
+            <input id="orgName" className="auth-input" value={orgModalName} onChange={(e) => setOrgModalName(e.target.value)} />
           </div>
 
           <div className="auth-field">
             <label className="auth-label" htmlFor="orgType">
               Type
             </label>
-            <select
-              id="orgType"
-              className="auth-input"
-              value={orgModalType}
-              onChange={(e) => setOrgModalType(e.target.value as PendingOrg["type"])}
-            >
+            <select id="orgType" className="auth-input" value={orgModalType} onChange={(e) => setOrgModalType(e.target.value as PendingOrg["type"])}>
               <option value="INDUSTRY">Industry</option>
               <option value="UNIVERSITY">University</option>
               <option value="OTHER">Other</option>
@@ -413,31 +397,14 @@ export default function CreateUserForm(props: { meta: Meta }) {
         </div>
       </Modal>
 
-      {/* Add role modal */}
       <Modal
         title="Add role"
-        description="Create a new role and select it."
+        description="Enter a role label. The system will generate a role key automatically."
         isOpen={roleModalOpen}
         onClose={() => setRoleModalOpen(false)}
-        initialFocusSelector="#roleKey"
+        initialFocusSelector="#roleLabel"
       >
         <div className="stack" style={{ ["--stack-gap" as any]: "0.75rem" }}>
-          <div className="auth-field">
-            <label className="auth-label" htmlFor="roleKey">
-              Role key
-            </label>
-            <input
-              id="roleKey"
-              className="auth-input"
-              value={roleModalKey}
-              onChange={(e) => setRoleModalKey(e.target.value)}
-              placeholder="e.g. MEMBER"
-            />
-            <p className="small" style={{ margin: 0 }}>
-              Use uppercase letters, numbers, and underscores.
-            </p>
-          </div>
-
           <div className="auth-field">
             <label className="auth-label" htmlFor="roleLabel">
               Role label
@@ -447,8 +414,11 @@ export default function CreateUserForm(props: { meta: Meta }) {
               className="auth-input"
               value={roleModalLabel}
               onChange={(e) => setRoleModalLabel(e.target.value)}
-              placeholder="e.g. Member"
+              placeholder="e.g. Module leader"
             />
+            <p className="small" style={{ margin: 0 }}>
+              Role key preview: <strong>{labelToRoleKey(roleModalLabel || "—") || "—"}</strong>
+            </p>
           </div>
 
           <div className="auth-actions">

@@ -12,13 +12,15 @@ type Body = {
 export async function POST(req: Request) {
   const session = await getServerAuthSession();
   const me = session?.user as any | undefined;
-  if (!me?.id) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
+  if (!me?.id) {
+    return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
+  }
 
   const roleKeys: string[] = me.roleKeys ?? [];
   const isAdmin = roleKeys.includes("ADMIN");
 
   const body = (await req.json()) as Body;
-  const targetUserId = String(body.targetUserId ?? "");
+  const targetUserId = String(body.targetUserId ?? "").trim();
 
   if (!targetUserId) {
     return NextResponse.json({ ok: false, error: "Target user is required." }, { status: 400 });
@@ -41,7 +43,24 @@ export async function POST(req: Request) {
     }
   }
 
-  await prisma.user.delete({ where: { id: targetUserId } });
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Delete dependents first (prevents FK constraint failures)
+      await tx.userRole.deleteMany({ where: { userId: targetUserId } });
+      await tx.membership.deleteMany({ where: { userId: targetUserId } });
 
-  return NextResponse.json({ ok: true }, { status: 200 });
+      // Finally delete the user record
+      await tx.user.delete({ where: { id: targetUserId } });
+    });
+
+    return NextResponse.json({ ok: true }, { status: 200 });
+  } catch (e: any) {
+    // Prisma constraint errors often surface here; return a helpful message.
+    const msg =
+      typeof e?.message === "string" && e.message
+        ? e.message
+        : "Could not delete user (possible related records preventing deletion).";
+
+    return NextResponse.json({ ok: false, error: msg }, { status: 400 });
+  }
 }

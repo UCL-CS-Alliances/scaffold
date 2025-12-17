@@ -1,3 +1,4 @@
+// Note: No longer in use. Moved to pending orgs and update-user workflow to make new orgs persistent. Keeping file for implementing org management later (e.g. edit or delete org).
 // src/app/api/admin/organisations/route.ts
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";

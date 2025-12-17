@@ -1,7 +1,7 @@
 // src/components/account/UserProfileForm.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "@/components/ui/Modal";
 import { signOut } from "next-auth/react";
 
@@ -24,12 +24,27 @@ type PendingOrg = {
 
 type PendingRole = {
   clientId: string;
-  key: string;
+  key: string; // GENERATED
   label: string;
 };
 
 function makeClientId(prefix: string) {
   return `${prefix}:pending:${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
+}
+
+function labelToRoleKey(label: string) {
+  const normalized = label
+    .trim()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  const underscored = normalized
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+
+  return underscored;
 }
 
 export default function UserProfileForm(props: {
@@ -58,6 +73,10 @@ export default function UserProfileForm(props: {
 
   // Default app (visible to all)
   const [defaultAppId, setDefaultAppId] = useState<number | null>(null);
+  const [defaultAppTouched, setDefaultAppTouched] = useState(false);
+
+  // Tracks the last preset we auto-applied in this session
+  const lastAppliedPresetAppIdRef = useRef<number | null>(null);
 
   // Admin-only selections
   const [organisationChoice, setOrganisationChoice] = useState<
@@ -78,13 +97,12 @@ export default function UserProfileForm(props: {
   const [pendingOrgs, setPendingOrgs] = useState<PendingOrg[]>([]);
   const [pendingRoles, setPendingRoles] = useState<PendingRole[]>([]);
 
-  // Modals for pending org/role creation
+  // Modals
   const [orgModalOpen, setOrgModalOpen] = useState(false);
   const [orgModalName, setOrgModalName] = useState("");
   const [orgModalType, setOrgModalType] = useState<PendingOrg["type"]>("INDUSTRY");
 
   const [roleModalOpen, setRoleModalOpen] = useState(false);
-  const [roleModalKey, setRoleModalKey] = useState("");
   const [roleModalLabel, setRoleModalLabel] = useState("");
 
   // Danger zone state
@@ -146,6 +164,38 @@ export default function UserProfileForm(props: {
     return selectedRoleKeys.includes("ADMIN");
   }, [isAdmin, selectedRoleKeys]);
 
+  // Stage 1: role → default app preset (only when exactly one mapped role selected)
+  const presetDefaultAppId = useMemo(() => {
+    if (!isAdmin) return null; // only admins can change roles in this UI
+    if (!appsMeta?.apps?.length) return null;
+    if (selectedRoleKeys.length !== 1) return null;
+
+    const onlyRole = selectedRoleKeys[0];
+
+    const roleToAppKey: Record<string, string> = {
+      STUDENT: "TALENT_DISCOVERY",
+      MEMBER: "MEMBERSHIP_DASHBOARD",
+      MODULE_LEADER: "IXN_WORKFLOW_MANAGER",
+    };
+
+    const appKey = roleToAppKey[onlyRole];
+    if (!appKey) return null;
+
+    const app = appsMeta.apps.find((a) => a.key === appKey);
+    return app?.id ?? null;
+  }, [appsMeta, isAdmin, selectedRoleKeys]);
+
+  // Role change wins: apply preset when (and only when) the preset changes.
+  // This prevents "snapping back" after a manual change unless roles change.
+  useEffect(() => {
+    if (presetDefaultAppId === null) return;
+
+    if (lastAppliedPresetAppIdRef.current === presetDefaultAppId) return;
+
+    setDefaultAppId(presetDefaultAppId);
+    lastAppliedPresetAppIdRef.current = presetDefaultAppId;
+  }, [presetDefaultAppId]);
+
   useEffect(() => {
     async function load() {
       setMessage(null);
@@ -163,6 +213,8 @@ export default function UserProfileForm(props: {
         setEmail(data.user.email ?? "");
 
         setDefaultAppId(data.user.defaultAppId ?? null);
+        setDefaultAppTouched(false);
+        lastAppliedPresetAppIdRef.current = null;
 
         // Clear pending items when switching targets
         setPendingOrgs([]);
@@ -263,15 +315,25 @@ export default function UserProfileForm(props: {
   }
 
   function openAddRole() {
-    setRoleModalKey("");
     setRoleModalLabel("");
     setRoleModalOpen(true);
   }
 
   function confirmAddRole() {
-    const key = roleModalKey.trim().toUpperCase();
     const label = roleModalLabel.trim();
-    if (!key || !label) return;
+    if (!label) return;
+
+    const key = labelToRoleKey(label);
+    if (!key) return;
+
+    // Prevent duplicates against existing + pending keys
+    const existsInDb = (meta?.roles ?? []).some((r) => r.key === key);
+    const existsPending = pendingRoles.some((r) => r.key === key);
+    if (existsInDb || existsPending) {
+      setMessage(`Role "${label}" maps to key "${key}", which already exists.`);
+      setRoleModalOpen(false);
+      return;
+    }
 
     const clientId = makeClientId("role");
     const role: PendingRole = { clientId, key, label };
@@ -390,7 +452,7 @@ export default function UserProfileForm(props: {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           email: email.trim().toLowerCase(),
-          defaultAppId, // IMPORTANT: needed for non-admin updates
+          defaultAppId, // IMPORTANT: needed for non-admin updates too
         },
       };
 
@@ -399,7 +461,7 @@ export default function UserProfileForm(props: {
 
         payload.admin = {
           organisationChoice,
-          defaultAppId, // admin route currently reads this, so keep it
+          defaultAppId, // still okay to send
           roleChoices,
           pending: { organisations: pendingOrgs, roles: pendingRoles },
           membership: isMemberRoleSelected
@@ -483,21 +545,40 @@ export default function UserProfileForm(props: {
               <label className="auth-label" htmlFor="firstName">
                 First name
               </label>
-              <input className="auth-input" id="firstName" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+              <input
+                className="auth-input"
+                id="firstName"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                required
+              />
             </div>
 
             <div className="auth-field">
               <label className="auth-label" htmlFor="lastName">
                 Last name
               </label>
-              <input className="auth-input" id="lastName" value={lastName} onChange={(e) => setLastName(e.target.value)} required />
+              <input
+                className="auth-input"
+                id="lastName"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                required
+              />
             </div>
 
             <div className="auth-field">
               <label className="auth-label" htmlFor="email">
                 Email
               </label>
-              <input className="auth-input" id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              <input
+                className="auth-input"
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
             </div>
 
             {/* Admin fundamentals */}
@@ -544,8 +625,20 @@ export default function UserProfileForm(props: {
 
                   <div className="tile" style={{ padding: "0.75rem" }}>
                     {roleOptions.map((r) => (
-                      <label key={r.key} style={{ display: "flex", gap: "0.5rem", alignItems: "center", padding: "0.25rem 0" }}>
-                        <input type="checkbox" checked={roleChecked(r.key)} onChange={() => toggleRole(r.key)} />
+                      <label
+                        key={r.key}
+                        style={{
+                          display: "flex",
+                          gap: "0.5rem",
+                          alignItems: "center",
+                          padding: "0.25rem 0",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={roleChecked(r.key)}
+                          onChange={() => toggleRole(r.key)}
+                        />
                         <span>{r.label}</span>
                       </label>
                     ))}
@@ -632,7 +725,11 @@ export default function UserProfileForm(props: {
                 id="defaultApp"
                 className="auth-input"
                 value={defaultAppId ?? ""}
-                onChange={(e) => setDefaultAppId(e.target.value ? Number(e.target.value) : null)}
+                onChange={(e) => {
+                  setDefaultAppTouched(true);
+                  // lastAppliedPresetAppIdRef.current = null; // optional: not used in "role change wins" approach
+                  setDefaultAppId(e.target.value ? Number(e.target.value) : null);
+                }}
               >
                 <option value="">—</option>
                 {appsMeta.apps.map((a) => (
@@ -652,7 +749,12 @@ export default function UserProfileForm(props: {
         )}
 
         <div className="auth-actions">
-          <button type="button" className="button-link button-link--primary" onClick={() => void save()} disabled={saving}>
+          <button
+            type="button"
+            className="button-link button-link--primary"
+            onClick={() => void save()}
+            disabled={saving}
+          >
             {saving ? "Saving…" : "Save changes"}
           </button>
         </div>
@@ -718,12 +820,18 @@ export default function UserProfileForm(props: {
 
           {/* Admin editing other: reset password + suspend/delete */}
           {adminEditingOther && (
-            <div className="stack" style={{ ["--stack-gap" as any]: "0.85rem", marginTop: "1rem" }}>
+            <div
+              className="stack"
+              style={{ ["--stack-gap" as any]: "0.85rem", marginTop: "1rem" }}
+            >
               <h4 style={{ margin: "0.25rem 0" }}>Admin actions</h4>
 
               {/* Password section with Reset + Copy */}
               <div className="tile" style={{ padding: "0.75rem" }}>
-                <div className="cluster" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                <div
+                  className="cluster"
+                  style={{ justifyContent: "space-between", alignItems: "center" }}
+                >
                   <div>
                     <strong>Temporary password</strong>
                     <p className="small" style={{ margin: 0 }}>
@@ -757,7 +865,9 @@ export default function UserProfileForm(props: {
                   <div className="tile" style={{ padding: "0.75rem", marginTop: "0.75rem" }}>
                     <p style={{ marginTop: 0 }}>
                       <strong>Temporary password:</strong>{" "}
-                      <span style={{ fontFamily: "var(--font-mono, monospace)" }}>{tempPassword}</span>
+                      <span style={{ fontFamily: "var(--font-mono, monospace)" }}>
+                        {tempPassword}
+                      </span>
                     </p>
                   </div>
                 ) : (
@@ -800,14 +910,21 @@ export default function UserProfileForm(props: {
               </div>
 
               {/* Delete */}
-              <div className="cluster" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <div
+                className="cluster"
+                style={{ justifyContent: "space-between", alignItems: "center" }}
+              >
                 <div>
                   <strong>Delete account</strong>
                   <p className="small" style={{ margin: 0 }}>
                     Permanently removes the user from the database. This cannot be undone.
                   </p>
                 </div>
-                <button type="button" className="button-link button-link--secondary" onClick={() => setDeleteOpen(true)}>
+                <button
+                  type="button"
+                  className="button-link button-link--secondary"
+                  onClick={() => setDeleteOpen(true)}
+                >
                   Delete user
                 </button>
               </div>
@@ -816,13 +933,20 @@ export default function UserProfileForm(props: {
 
           {/* Non-admin self delete */}
           {nonAdminSelfDeleteAllowed && (
-            <div className="stack" style={{ ["--stack-gap" as any]: "0.75rem", marginTop: "1rem" }}>
+            <div
+              className="stack"
+              style={{ ["--stack-gap" as any]: "0.75rem", marginTop: "1rem" }}
+            >
               <h4 style={{ margin: "0.25rem 0" }}>Delete account</h4>
               <p className="small" style={{ marginTop: 0 }}>
                 This permanently removes your account and access. This cannot be undone.
               </p>
 
-              <button type="button" className="button-link button-link--secondary" onClick={() => setDeleteOpen(true)}>
+              <button
+                type="button"
+                className="button-link button-link--secondary"
+                onClick={() => setDeleteOpen(true)}
+              >
                 Delete my account
               </button>
             </div>
@@ -830,11 +954,14 @@ export default function UserProfileForm(props: {
 
           {/* Admin self: no delete */}
           {isAdmin && editingSelf && (
-            <div className="stack" style={{ ["--stack-gap" as any]: "0.5rem", marginTop: "1rem" }}>
+            <div
+              className="stack"
+              style={{ ["--stack-gap" as any]: "0.5rem", marginTop: "1rem" }}
+            >
               <h4 style={{ margin: "0.25rem 0" }}>Delete account</h4>
               <p className="small" style={{ marginTop: 0 }}>
-                Admin accounts cannot be deleted directly. To delete this account, first remove the ADMIN role and save changes.
-                You will be signed out after demotion.
+                Admin accounts cannot be deleted directly. To delete this account, first remove the
+                ADMIN role and save changes. You will be signed out after demotion.
               </p>
             </div>
           )}
@@ -853,7 +980,8 @@ export default function UserProfileForm(props: {
         initialFocusSelector='button[data-autofocus="true"]'
       >
         <p>
-          You have unchecked the <strong>ADMIN</strong> role for your own account. This change requires confirmation.
+          You have unchecked the <strong>ADMIN</strong> role for your own account. This change
+          requires confirmation.
         </p>
 
         <div className="auth-actions" style={{ marginTop: "0.75rem" }}>
@@ -893,7 +1021,11 @@ export default function UserProfileForm(props: {
         onClose={() => setDeleteOpen(false)}
         initialFocusSelector='button[data-autofocus="true"]'
       >
-        <p>{editingSelf ? "Are you sure you want to delete your account?" : "Are you sure you want to delete this user account?"}</p>
+        <p>
+          {editingSelf
+            ? "Are you sure you want to delete your account?"
+            : "Are you sure you want to delete this user account?"}
+        </p>
 
         <div className="auth-actions" style={{ marginTop: "0.75rem" }}>
           <button type="button" className="button-link" onClick={() => setDeleteOpen(false)}>
@@ -925,7 +1057,12 @@ export default function UserProfileForm(props: {
             <label className="auth-label" htmlFor="orgName">
               Organisation name
             </label>
-            <input id="orgName" className="auth-input" value={orgModalName} onChange={(e) => setOrgModalName(e.target.value)} />
+            <input
+              id="orgName"
+              className="auth-input"
+              value={orgModalName}
+              onChange={(e) => setOrgModalName(e.target.value)}
+            />
           </div>
 
           <div className="auth-field">
@@ -948,7 +1085,11 @@ export default function UserProfileForm(props: {
             <button type="button" className="button-link" onClick={() => setOrgModalOpen(false)}>
               Cancel
             </button>
-            <button type="button" className="button-link button-link--primary" onClick={confirmAddOrg}>
+            <button
+              type="button"
+              className="button-link button-link--primary"
+              onClick={confirmAddOrg}
+            >
               Add organisation
             </button>
           </div>
@@ -958,28 +1099,12 @@ export default function UserProfileForm(props: {
       {/* Add role modal */}
       <Modal
         title="Add role"
-        description="Create a new role and select it."
+        description="Enter a role label. The system will generate a role key automatically."
         isOpen={roleModalOpen}
         onClose={() => setRoleModalOpen(false)}
-        initialFocusSelector="#roleKey"
+        initialFocusSelector="#roleLabel"
       >
         <div className="stack" style={{ ["--stack-gap" as any]: "0.75rem" }}>
-          <div className="auth-field">
-            <label className="auth-label" htmlFor="roleKey">
-              Role key
-            </label>
-            <input
-              id="roleKey"
-              className="auth-input"
-              value={roleModalKey}
-              onChange={(e) => setRoleModalKey(e.target.value)}
-              placeholder="e.g. MEMBER"
-            />
-            <p className="small" style={{ margin: 0 }}>
-              Use uppercase letters, numbers, and underscores.
-            </p>
-          </div>
-
           <div className="auth-field">
             <label className="auth-label" htmlFor="roleLabel">
               Role label
@@ -989,15 +1114,22 @@ export default function UserProfileForm(props: {
               className="auth-input"
               value={roleModalLabel}
               onChange={(e) => setRoleModalLabel(e.target.value)}
-              placeholder="e.g. Member"
+              placeholder="e.g. Module leader"
             />
+            <p className="small" style={{ margin: 0 }}>
+              Role key preview: <strong>{labelToRoleKey(roleModalLabel || "—") || "—"}</strong>
+            </p>
           </div>
 
           <div className="auth-actions">
             <button type="button" className="button-link" onClick={() => setRoleModalOpen(false)}>
               Cancel
             </button>
-            <button type="button" className="button-link button-link--primary" onClick={confirmAddRole}>
+            <button
+              type="button"
+              className="button-link button-link--primary"
+              onClick={confirmAddRole}
+            >
               Add role
             </button>
           </div>

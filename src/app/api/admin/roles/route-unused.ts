@@ -1,3 +1,4 @@
+// Note: No longer in use. Moved to pending role and update-user workflow to make new role persistent. Keeping file for implementing role management later (e.g. edit or delete role).
 // src/app/api/admin/roles/route.ts
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
