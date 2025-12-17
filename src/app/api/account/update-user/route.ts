@@ -10,6 +10,12 @@ function looksLikeEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function parseNullableNumber(value: any): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 export async function POST(req: Request) {
   const session = await getServerAuthSession();
   const me = session?.user as any | undefined;
@@ -22,14 +28,15 @@ export async function POST(req: Request) {
 
   const body = await req.json();
 
-  const targetUserId: string = isAdmin
-    ? String(body.targetUserId ?? me.id)
-    : String(me.id);
+  const targetUserId: string = isAdmin ? String(body.targetUserId ?? me.id) : String(me.id);
 
   const userInput = body.user ?? {};
   const firstName = String(userInput.firstName ?? "").trim();
   const lastName = String(userInput.lastName ?? "").trim();
   const email = String(userInput.email ?? "").trim().toLowerCase();
+
+  // NEW: allow defaultAppId for all users (self-edit)
+  const userDefaultAppId = parseNullableNumber(userInput.defaultAppId);
 
   if (!firstName || !lastName || !email) {
     return NextResponse.json(
@@ -38,7 +45,10 @@ export async function POST(req: Request) {
     );
   }
   if (!looksLikeEmail(email)) {
-    return NextResponse.json({ ok: false, error: "Email address format is invalid." }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: "Email address format is invalid." },
+      { status: 400 },
+    );
   }
 
   // Check uniqueness (or same user)
@@ -54,26 +64,25 @@ export async function POST(req: Request) {
   }
 
   const admin = body.admin ?? null;
-
   const editingSelf = targetUserId === String(me.id);
 
   let wasAdmin = false;
   if (isAdmin && editingSelf) {
     const prev = await prisma.user.findUnique({
       where: { id: targetUserId },
-      select: {
-        roles: { select: { role: { select: { key: true } } } },
-      },
+      select: { roles: { select: { role: { select: { key: true } } } } },
     });
-
     wasAdmin = (prev?.roles ?? []).some((r) => r.role.key === "ADMIN");
   }
+
+  // NEW: make available outside transaction for response
+  let isAdminAfterSave = wasAdmin;
 
   try {
     await prisma.$transaction(async (tx) => {
       // 1) Create pending orgs/roles (if any) and build maps
-      let pendingOrgIdByClientId = new Map<string, number>();
-      let pendingRoleKeyByClientId = new Map<string, string>();
+      const pendingOrgIdByClientId = new Map<string, number>();
+      const pendingRoleKeyByClientId = new Map<string, string>();
 
       if (isAdmin && admin?.pending?.organisations?.length) {
         for (const o of admin.pending.organisations) {
@@ -125,7 +134,9 @@ export async function POST(req: Request) {
       let resolvedOrganisationId: number | null = null;
       let resolvedRoleKeys: string[] | null = null;
 
-      let resolvedDefaultAppId: number | null | undefined = undefined; // undefined = "no change"
+      // For admins, we keep admin.defaultAppId supported too,
+      // but the UI now also sends user.defaultAppId, so either works.
+      let resolvedDefaultAppIdForAdmin: number | null | undefined = undefined; // undefined = "no change"
       let resolvedMembershipTierId: number | null | undefined = undefined;
 
       if (isAdmin && admin) {
@@ -151,24 +162,34 @@ export async function POST(req: Request) {
         }
         resolvedRoleKeys = keys;
 
-      const isAdminAfterSave = resolvedRoleKeys.includes("ADMIN");
+        isAdminAfterSave = resolvedRoleKeys.includes("ADMIN");
 
-        resolvedDefaultAppId =
-          admin.defaultAppId === null || admin.defaultAppId === undefined
-            ? null
-            : Number(admin.defaultAppId);
+        resolvedDefaultAppIdForAdmin = parseNullableNumber(admin.defaultAppId);
 
         resolvedMembershipTierId =
-          admin.membership?.membershipTierId == null ? null : Number(admin.membership.membershipTierId);
+          admin.membership?.membershipTierId == null
+            ? null
+            : Number(admin.membership.membershipTierId);
+      } else {
+        // Non-admin: session roles unchanged
+        isAdminAfterSave = wasAdmin;
       }
 
       // 3) Update user record
       const userUpdate: any = { firstName, lastName, email };
 
+      // NEW: Everyone can set their own default app
+      userUpdate.defaultAppId = userDefaultAppId;
+
       if (isAdmin) {
-        // admin can set these
+        // Admin can also set organisation
         userUpdate.organisationId = resolvedOrganisationId;
-        userUpdate.defaultAppId = resolvedDefaultAppId ?? null;
+
+        // If admin explicitly set an admin defaultAppId, prefer it;
+        // otherwise userDefaultAppId already covers the common case.
+        if (resolvedDefaultAppIdForAdmin !== undefined) {
+          userUpdate.defaultAppId = resolvedDefaultAppIdForAdmin;
+        }
       }
 
       await tx.user.update({
@@ -243,12 +264,9 @@ export async function POST(req: Request) {
       }
     });
 
-const adminDemoted = editingSelf && wasAdmin && !isAdminAfterSave;
+    const adminDemoted = editingSelf && wasAdmin && !isAdminAfterSave;
 
-return NextResponse.json(
-  { ok: true, adminDemoted },
-  { status: 200 },
-);
+    return NextResponse.json({ ok: true, adminDemoted }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json(
       { ok: false, error: e?.message ?? "Could not save changes." },

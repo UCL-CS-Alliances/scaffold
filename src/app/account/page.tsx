@@ -48,7 +48,13 @@ export default async function AccountPage(props: AccountPageProps) {
   const requestedUserId = pickFirst(sp?.userId);
   const tempPassword = pickFirst(sp?.tempPassword);
 
-  const [users, meta] = isAdmin
+  // Everyone needs apps for the Default app selector
+  const apps = await prisma.app.findMany({
+    select: { id: true, key: true, name: true },
+    orderBy: { name: "asc" },
+  });
+
+  const [users, adminMeta] = isAdmin
     ? await Promise.all([
         prisma.user.findMany({
           select: {
@@ -72,11 +78,7 @@ export default async function AccountPage(props: AccountPageProps) {
             select: { id: true, key: true, label: true, rank: true },
             orderBy: { rank: "asc" },
           }),
-          prisma.app.findMany({
-            select: { id: true, key: true, name: true },
-            orderBy: { name: "asc" },
-          }),
-        ]).then(([organisations, roles, tiers, apps]) => ({
+        ]).then(([organisations, roles, tiers]) => ({
           organisations,
           roles,
           tiers,
@@ -91,7 +93,11 @@ export default async function AccountPage(props: AccountPageProps) {
     <section className="content-section">
       <header className="content-header">
         <h1>Edit profile</h1>
-        <p>Update your details. Admins can also edit other user profiles.</p>
+        {isAdmin ? (
+          <p>Update your details. Admins can also edit other user profiles.</p>
+        ) : (
+          <p>Update your details.</p>
+        )}
       </header>
 
       <AccountPageClient
@@ -99,14 +105,15 @@ export default async function AccountPage(props: AccountPageProps) {
         isAdmin={isAdmin}
         initialSelectedUserId={initialSelectedUserId}
         initialTempPassword={isAdmin ? tempPassword ?? null : null}
+        appsMeta={{ apps }}
         adminData={
-          isAdmin && users && meta
+          isAdmin && users && adminMeta
             ? {
                 users: users.map((u) => ({
                   id: u.id,
                   label: `${u.firstName} ${u.lastName} (${u.organisation?.name ?? "No organisation"})`,
                 })),
-                meta,
+                meta: adminMeta,
               }
             : null
         }

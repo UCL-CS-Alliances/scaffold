@@ -12,6 +12,8 @@ type Meta = {
   apps: { id: number; key: string; name: string }[];
 };
 
+type AppsMeta = { apps: { id: number; key: string; name: string }[] };
+
 type Mode = "self-edit" | "admin-edit";
 
 type PendingOrg = {
@@ -22,7 +24,7 @@ type PendingOrg = {
 
 type PendingRole = {
   clientId: string;
-  key: string; // will be uppercased client-side
+  key: string;
   label: string;
 };
 
@@ -34,11 +36,12 @@ export default function UserProfileForm(props: {
   mode: Mode;
   meId: string;
   targetUserId: string;
-  meta?: Meta; // only passed for admin mode
+  meta?: Meta; // admin-only meta
+  appsMeta?: AppsMeta; // apps list for everyone
   initialSelf?: { id: string; email: string; firstName: string; lastName: string };
-  initialTempPassword?: string; // only used when redirecting from add-user flow
+  initialTempPassword?: string;
 }) {
-  const { mode, meId, targetUserId, meta, initialSelf, initialTempPassword } = props;
+  const { mode, meId, targetUserId, meta, appsMeta, initialSelf, initialTempPassword } = props;
 
   const isAdmin = mode === "admin-edit";
   const editingSelf = targetUserId === meId;
@@ -53,35 +56,25 @@ export default function UserProfileForm(props: {
   const [lastName, setLastName] = useState(initialSelf?.lastName ?? "");
   const [email, setEmail] = useState(initialSelf?.email ?? "");
 
-  // Admin additional info (existing selections)
+  // Default app (visible to all)
+  const [defaultAppId, setDefaultAppId] = useState<number | null>(null);
+
+  // Admin-only selections
   const [organisationChoice, setOrganisationChoice] = useState<
     { kind: "existing"; id: number } | { kind: "pending"; clientId: string } | null
   >(null);
-
-  const [defaultAppId, setDefaultAppId] = useState<number | null>(null);
 
   const [roleChoices, setRoleChoices] = useState<
     Array<{ kind: "existing"; key: string } | { kind: "pending"; clientId: string }>
   >([]);
 
-  // Single membership (admin-only)
+  // Membership (admin-only)
   const [membershipTierId, setMembershipTierId] = useState<number | null>(null);
   const [membershipStatus, setMembershipStatus] = useState<string>("active");
   const [membershipManagerName, setMembershipManagerName] = useState<string>("");
   const [membershipExpiryText, setMembershipExpiryText] = useState<string>(""); // dd/mm/yyyy
-  const [membershipIsActive, setMembershipIsActive] = useState<boolean>(true);
 
-  // Membership summary (we will not show to non-admins per your request)
-  const [membershipSummary, setMembershipSummary] = useState<null | {
-    organisationName: string | null;
-    tierLabel: string | null;
-    status: string | null;
-    expiryText: string | null;
-    managerName: string | null;
-    isActive: boolean | null;
-  }>(null);
-
-  // Pending additions (not written to DB until Save)
+  // Pending additions (admin-only)
   const [pendingOrgs, setPendingOrgs] = useState<PendingOrg[]>([]);
   const [pendingRoles, setPendingRoles] = useState<PendingRole[]>([]);
 
@@ -94,9 +87,7 @@ export default function UserProfileForm(props: {
   const [roleModalKey, setRoleModalKey] = useState("");
   const [roleModalLabel, setRoleModalLabel] = useState("");
 
-  // ─────────────────────────────────────────────
   // Danger zone state
-  // ─────────────────────────────────────────────
   const [pwCurrent, setPwCurrent] = useState("");
   const [pwNext, setPwNext] = useState("");
   const [pwMessage, setPwMessage] = useState<string | null>(null);
@@ -111,17 +102,13 @@ export default function UserProfileForm(props: {
   const [resetBusy, setResetBusy] = useState(false);
   const [tempPassword, setTempPassword] = useState<string | null>(initialTempPassword ?? null);
 
-  // Combined lists for admin UI
   const organisationOptions = useMemo(() => {
     const db = meta?.organisations ?? [];
     const pending = pendingOrgs.map((o) => ({
       id: `pending:${o.clientId}`,
       label: `${o.name} (new)`,
     }));
-    const dbMapped = db.map((o) => ({
-      id: `existing:${o.id}`,
-      label: o.name,
-    }));
+    const dbMapped = db.map((o) => ({ id: `existing:${o.id}`, label: o.name }));
     return [...dbMapped, ...pending];
   }, [meta, pendingOrgs]);
 
@@ -138,7 +125,6 @@ export default function UserProfileForm(props: {
     return [...dbMapped, ...pending];
   }, [meta, pendingRoles]);
 
-  // Resolve selected role keys (including pending role keys)
   const selectedRoleKeys = useMemo(() => {
     const out: string[] = [];
     for (const c of roleChoices) {
@@ -155,13 +141,11 @@ export default function UserProfileForm(props: {
     return isAdmin ? selectedRoleKeys.includes("MEMBER") : false;
   }, [isAdmin, selectedRoleKeys]);
 
-  // Is ADMIN role checked (in UI) — used for demotion confirmation
   const isAdminRoleChecked = useMemo(() => {
     if (!isAdmin) return false;
     return selectedRoleKeys.includes("ADMIN");
   }, [isAdmin, selectedRoleKeys]);
 
-  // Load data for target user
   useEffect(() => {
     async function load() {
       setMessage(null);
@@ -178,39 +162,33 @@ export default function UserProfileForm(props: {
         setLastName(data.user.lastName ?? "");
         setEmail(data.user.email ?? "");
 
-        // Keep summary in state (even if we don’t render it for non-admins)
-        setMembershipSummary(data.membershipSummary ?? null);
+        setDefaultAppId(data.user.defaultAppId ?? null);
 
-        // Reset in-progress pending items when switching users (safer)
+        // Clear pending items when switching targets
         setPendingOrgs([]);
         setPendingRoles([]);
+
         setPwCurrent("");
         setPwNext("");
         setPwMessage(null);
 
-        // When switching user, clear temp password (it belongs to the redirected user)
+        // Temp password only belongs to redirected user; keep if present, otherwise clear
         setTempPassword(initialTempPassword ?? null);
 
         if (isAdmin) {
-          // existing organisation
           if (data.user.organisationId) {
             setOrganisationChoice({ kind: "existing", id: data.user.organisationId });
           } else {
             setOrganisationChoice(null);
           }
 
-          setDefaultAppId(data.user.defaultAppId ?? null);
-
-          // roles
           const keys: string[] = data.user.roleKeys ?? [];
           setRoleChoices(keys.map((k) => ({ kind: "existing", key: k })));
 
-          // membership edit (single active)
           setMembershipTierId(data.membershipEdit?.membershipTierId ?? null);
           setMembershipStatus((data.membershipEdit?.status ?? "active") || "active");
           setMembershipManagerName(data.membershipEdit?.managerName ?? "");
           setMembershipExpiryText(data.membershipEdit?.expiryText ?? "");
-          setMembershipIsActive(data.membershipEdit?.isActive ?? true);
         }
       } catch (e: any) {
         setMessage(e?.message ?? "Could not load user.");
@@ -260,12 +238,10 @@ export default function UserProfileForm(props: {
       return;
     }
     if (optionId.startsWith("existing:")) {
-      const id = Number(optionId.replace("existing:", ""));
-      setOrganisationChoice({ kind: "existing", id });
+      setOrganisationChoice({ kind: "existing", id: Number(optionId.replace("existing:", "")) });
       return;
     }
-    const clientId = optionId.replace("pending:", "");
-    setOrganisationChoice({ kind: "pending", clientId });
+    setOrganisationChoice({ kind: "pending", clientId: optionId.replace("pending:", "") });
   }
 
   function openAddOrg() {
@@ -283,7 +259,6 @@ export default function UserProfileForm(props: {
 
     setPendingOrgs((prev) => [...prev, org]);
     setOrganisationChoice({ kind: "pending", clientId });
-
     setOrgModalOpen(false);
   }
 
@@ -303,7 +278,6 @@ export default function UserProfileForm(props: {
 
     setPendingRoles((prev) => [...prev, role]);
     setRoleChoices((prev) => [...prev, { kind: "pending", clientId }]);
-
     setRoleModalOpen(false);
   }
 
@@ -316,10 +290,7 @@ export default function UserProfileForm(props: {
       const r = await fetch("/api/account/change-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          currentPassword: pwCurrent,
-          newPassword: pwNext,
-        }),
+        body: JSON.stringify({ currentPassword: pwCurrent, newPassword: pwNext }),
       });
 
       const data = await r.json();
@@ -419,25 +390,25 @@ export default function UserProfileForm(props: {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           email: email.trim().toLowerCase(),
+          defaultAppId, // IMPORTANT: needed for non-admin updates
         },
       };
 
       if (isAdmin) {
+        const derivedIsActive = (membershipStatus || "active") !== "suspended";
+
         payload.admin = {
           organisationChoice,
-          defaultAppId,
+          defaultAppId, // admin route currently reads this, so keep it
           roleChoices,
-          pending: {
-            organisations: pendingOrgs,
-            roles: pendingRoles,
-          },
+          pending: { organisations: pendingOrgs, roles: pendingRoles },
           membership: isMemberRoleSelected
             ? {
                 membershipTierId,
                 status: (membershipStatus || "active").trim() || "active",
                 managerName: membershipManagerName.trim() || null,
                 expiryText: membershipExpiryText.trim() || null,
-                isActive: Boolean(membershipIsActive),
+                isActive: derivedIsActive,
               }
             : {
                 membershipTierId: null,
@@ -461,11 +432,9 @@ export default function UserProfileForm(props: {
         return;
       }
 
-      // Clear pending items after successful save
       setPendingOrgs([]);
       setPendingRoles([]);
 
-      // If admin demoted themselves, sign out so session reflects new roles
       if (data.adminDemoted) {
         await signOut({ callbackUrl: "/sign-in" });
         return;
@@ -480,7 +449,6 @@ export default function UserProfileForm(props: {
   }
 
   async function save() {
-    // Admin demotion confirmation (admin editing their own profile)
     if (isAdmin && editingSelf) {
       const adminWillBeRemoved = !isAdminRoleChecked;
       if (adminWillBeRemoved) {
@@ -489,7 +457,6 @@ export default function UserProfileForm(props: {
         return;
       }
     }
-
     await saveImpl();
   }
 
@@ -501,8 +468,7 @@ export default function UserProfileForm(props: {
     );
   }
 
-  // Permission rules for danger zone
-  const canChangePassword = editingSelf; // self only (admins and non-admins)
+  const canChangePassword = editingSelf;
   const nonAdminSelfDeleteAllowed = !isAdmin && editingSelf;
 
   return (
@@ -517,43 +483,24 @@ export default function UserProfileForm(props: {
               <label className="auth-label" htmlFor="firstName">
                 First name
               </label>
-              <input
-                className="auth-input"
-                id="firstName"
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                required
-              />
+              <input className="auth-input" id="firstName" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
             </div>
 
             <div className="auth-field">
               <label className="auth-label" htmlFor="lastName">
                 Last name
               </label>
-              <input
-                className="auth-input"
-                id="lastName"
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                required
-              />
+              <input className="auth-input" id="lastName" value={lastName} onChange={(e) => setLastName(e.target.value)} required />
             </div>
 
             <div className="auth-field">
               <label className="auth-label" htmlFor="email">
                 Email
               </label>
-              <input
-                className="auth-input"
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
+              <input className="auth-input" id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
             </div>
 
-            {/* Admin fundamentals: Organisation + Roles */}
+            {/* Admin fundamentals */}
             {isAdmin && meta && (
               <>
                 <div className="auth-field">
@@ -597,15 +544,7 @@ export default function UserProfileForm(props: {
 
                   <div className="tile" style={{ padding: "0.75rem" }}>
                     {roleOptions.map((r) => (
-                      <label
-                        key={r.key}
-                        style={{
-                          display: "flex",
-                          gap: "0.5rem",
-                          alignItems: "center",
-                          padding: "0.25rem 0",
-                        }}
-                      >
+                      <label key={r.key} style={{ display: "flex", gap: "0.5rem", alignItems: "center", padding: "0.25rem 0" }}>
                         <input type="checkbox" checked={roleChecked(r.key)} onChange={() => toggleRole(r.key)} />
                         <span>{r.label}</span>
                       </label>
@@ -617,13 +556,10 @@ export default function UserProfileForm(props: {
           </div>
         </div>
 
-        {/* Membership settings (admin-only, only if MEMBER role selected) */}
+        {/* Membership (admin-only, only if MEMBER role selected) */}
         {isAdmin && meta && isMemberRoleSelected && (
           <div className="tile" style={{ padding: "0.95rem" }}>
             <h3 style={{ marginTop: 0 }}>Membership</h3>
-            <p className="small" style={{ marginTop: "0.25rem" }}>
-              This section is available when the MEMBER role is selected.
-            </p>
 
             <div className="stack" style={{ ["--stack-gap" as any]: "0.85rem" }}>
               <div className="auth-field">
@@ -639,7 +575,7 @@ export default function UserProfileForm(props: {
                   <option value="">—</option>
                   {meta.tiers.map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.label} ({t.key})
+                      {t.label}
                     </option>
                   ))}
                 </select>
@@ -676,25 +612,16 @@ export default function UserProfileForm(props: {
                   Enter a date in dd/mm/yyyy format (e.g., 31/01/2026).
                 </span>
               </div>
-
-              <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                <input
-                  type="checkbox"
-                  checked={membershipIsActive}
-                  onChange={(e) => setMembershipIsActive(e.target.checked)}
-                />
-                <span>Membership is active</span>
-              </label>
             </div>
           </div>
         )}
 
-        {/* Advanced settings (admin-only) */}
-        {isAdmin && meta && (
+        {/* Advanced settings (visible to all if appsMeta exists) */}
+        {appsMeta?.apps?.length ? (
           <div className="tile tile--gradient" style={{ padding: "0.95rem" }}>
             <h3 style={{ marginTop: 0 }}>Advanced settings</h3>
             <p className="small" style={{ marginTop: "0.25rem" }}>
-              Admin-only fields that affect routing and defaults.
+              Choose your default app after signing in.
             </p>
 
             <div className="auth-field">
@@ -708,15 +635,15 @@ export default function UserProfileForm(props: {
                 onChange={(e) => setDefaultAppId(e.target.value ? Number(e.target.value) : null)}
               >
                 <option value="">—</option>
-                {meta.apps.map((a) => (
+                {appsMeta.apps.map((a) => (
                   <option key={a.id} value={a.id}>
-                    {a.name} ({a.key})
+                    {a.name}
                   </option>
                 ))}
               </select>
             </div>
           </div>
-        )}
+        ) : null}
 
         {message && (
           <p role="status" className="small">
@@ -730,9 +657,7 @@ export default function UserProfileForm(props: {
           </button>
         </div>
 
-        {/* ─────────────────────────────────────────────
-            Danger zone
-           ───────────────────────────────────────────── */}
+        {/* Danger zone */}
         <div className="tile" style={{ padding: "0.95rem", borderColor: "#f0b4b4" }}>
           <h3 style={{ marginTop: 0 }}>Danger zone</h3>
 
@@ -908,17 +833,13 @@ export default function UserProfileForm(props: {
             <div className="stack" style={{ ["--stack-gap" as any]: "0.5rem", marginTop: "1rem" }}>
               <h4 style={{ margin: "0.25rem 0" }}>Delete account</h4>
               <p className="small" style={{ marginTop: 0 }}>
-                Admin accounts cannot be deleted directly. To delete this account, first remove the ADMIN role and save
-                changes. You will be signed out after demotion.
+                Admin accounts cannot be deleted directly. To delete this account, first remove the ADMIN role and save changes.
+                You will be signed out after demotion.
               </p>
             </div>
           )}
         </div>
       </div>
-
-      {/* ─────────────────────────────────────────────
-          Modals
-         ───────────────────────────────────────────── */}
 
       {/* Admin demotion confirmation modal */}
       <Modal
@@ -972,9 +893,7 @@ export default function UserProfileForm(props: {
         onClose={() => setDeleteOpen(false)}
         initialFocusSelector='button[data-autofocus="true"]'
       >
-        <p>
-          {editingSelf ? "Are you sure you want to delete your account?" : "Are you sure you want to delete this user account?"}
-        </p>
+        <p>{editingSelf ? "Are you sure you want to delete your account?" : "Are you sure you want to delete this user account?"}</p>
 
         <div className="auth-actions" style={{ marginTop: "0.75rem" }}>
           <button type="button" className="button-link" onClick={() => setDeleteOpen(false)}>
@@ -1006,12 +925,7 @@ export default function UserProfileForm(props: {
             <label className="auth-label" htmlFor="orgName">
               Organisation name
             </label>
-            <input
-              id="orgName"
-              className="auth-input"
-              value={orgModalName}
-              onChange={(e) => setOrgModalName(e.target.value)}
-            />
+            <input id="orgName" className="auth-input" value={orgModalName} onChange={(e) => setOrgModalName(e.target.value)} />
           </div>
 
           <div className="auth-field">

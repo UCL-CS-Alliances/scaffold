@@ -13,14 +13,17 @@ type Meta = {
   apps: { id: number; key: string; name: string }[];
 };
 
+type AppsMeta = { apps: { id: number; key: string; name: string }[] };
+
 export default function AccountPageClient(props: {
   me: Me;
   isAdmin: boolean;
   initialSelectedUserId: string;
   initialTempPassword: string | null;
+  appsMeta: AppsMeta;
   adminData: null | { users: { id: string; label: string }[]; meta: Meta };
 }) {
-  const { me, isAdmin, adminData, initialSelectedUserId, initialTempPassword } = props;
+  const { me, isAdmin, adminData, initialSelectedUserId, initialTempPassword, appsMeta } = props;
 
   const [selectedUserId, setSelectedUserId] = useState(initialSelectedUserId);
   const [tempPassword, setTempPassword] = useState<string | null>(initialTempPassword);
@@ -61,7 +64,6 @@ export default function AccountPageClient(props: {
               value={selectedUserId}
               onChange={(e) => {
                 setSelectedUserId(e.target.value);
-                // If the admin switches users manually, drop the temp password (it belonged to the redirected user).
                 setTempPassword(null);
               }}
               style={{ width: "min(28rem, 100%)" }}
@@ -86,7 +88,8 @@ export default function AccountPageClient(props: {
         mode={isAdmin ? "admin-edit" : "self-edit"}
         meId={me.id}
         targetUserId={isAdmin ? selectedUserId : me.id}
-        meta={adminData?.meta ?? undefined}
+        meta={adminData?.meta}
+        appsMeta={appsMeta}
         initialSelf={me}
         initialTempPassword={tempPassword ?? undefined}
       />
