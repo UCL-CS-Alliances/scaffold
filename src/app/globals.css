@@ -1057,3 +1057,117 @@ article.pathway hr {
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+/* Admin dashboard */
+
+.admin-dashboard {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-section {
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background: var(--paper);
+}
+
+.admin-selector-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.tabs {
+  margin-top: 0.75rem;
+}
+
+.tab-list {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.5rem;
+}
+
+.tab {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  border-radius: 999px;
+  padding: 0.5rem 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tab.is-active {
+  border-color: var(--ucl-sky);
+}
+
+.tab-panel {
+  padding-top: 0.75rem;
+}
+
+.tab-panel--scroll {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+
+.table-wrap {
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  border-bottom: 1px solid var(--line);
+  padding: 0.5rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+/* Handbook */
+
+.handbook-grid {
+  display: grid;
+  grid-template-columns: minmax(14rem, 18rem) 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 900px) {
+  .handbook-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.handbook-toc ol {
+  margin: 0.5rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.handbook-pager {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.markdown-content :where(h1,h2,h3) {
+  scroll-margin-top: 6rem;
+}
+
+.markdown-content :where(p, ul, ol) {
+  max-width: 75ch;
+}
+
+.markdown-content a {
+  text-decoration: underline;
+}

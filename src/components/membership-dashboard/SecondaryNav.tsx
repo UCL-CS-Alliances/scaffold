@@ -17,7 +17,7 @@ export default function SecondaryNav() {
         disabled
         title="This action will be enabled in a future release."
       >
-        Schedule your next client experience check-in
+        Schedule client experience check-in
       </button>
 
       <button
@@ -27,7 +27,27 @@ export default function SecondaryNav() {
         disabled
         title="This action will be enabled in a future release."
       >
-        Send a custom engagement request
+        Customise benefits
+      </button>
+
+      <button
+        type="button"
+        className="pill"
+        aria-disabled="true"
+        disabled
+        title="This action will be enabled in a future release."
+      >
+        Download invoice
+      </button>
+
+      <button
+        type="button"
+        className="pill"
+        aria-disabled="true"
+        disabled
+        title="This action will be enabled in a future release."
+      >
+        View framework agreement
       </button>
     </nav>
   );
