@@ -57,6 +57,8 @@ export default function AdminDashboardClient(props: {
   const sp = useSearchParams();
   const [isPending, startTransition] = useTransition();
 
+  const tocSlug = handbook.chapters[0]?.slug ?? "table-of-contents";
+
   // Local select state fixes "snap back" during RSC refresh
   const [localSelectedUserId, setLocalSelectedUserId] = useState(
     selectedUserId ?? "",
@@ -71,7 +73,6 @@ export default function AdminDashboardClient(props: {
   const bootTab = asTabKey(initialTab) ?? urlTab ?? "members";
   const [activeTab, setActiveTab] = useState<TabKey>(bootTab);
 
-  // Keep client tab in sync if URL tab changes
   useEffect(() => {
     const next = asTabKey(sp?.get("tab"));
     if (next && next !== activeTab) setActiveTab(next);
@@ -99,6 +100,11 @@ export default function AdminDashboardClient(props: {
     setActiveTab(next);
     const params = new URLSearchParams(sp?.toString());
     params.set("tab", next);
+
+    // If entering handbook and no chapter is set, default to the ToC chapter.
+    if (next === "handbook" && !params.get("chapter")) {
+      params.set("chapter", tocSlug);
+    }
 
     startTransition(() => {
       pushWithParams(params);
@@ -151,6 +157,8 @@ export default function AdminDashboardClient(props: {
     return `/membership-dashboard?${params.toString()}`;
   }
 
+  const isTocPage = handbook.active.slug === tocSlug;
+
   return (
     <>
       {/* Account selector */}
@@ -187,7 +195,7 @@ export default function AdminDashboardClient(props: {
         </div>
       </section>
 
-      {/* Tabs + panels (no "Admin panels" heading) */}
+      {/* Tabs + panels */}
       <section className="admin-section">
         <div className="tabs">
           <div className="tab-list" role="tablist">
@@ -460,24 +468,71 @@ export default function AdminDashboardClient(props: {
             className="tab-panel tab-panel--scroll"
             hidden={activeTab !== "handbook"}
           >
-            <h3 style={{ marginTop: 0 }}>{handbook.active.title}</h3>
+            {/* ToC page = two column layout; chapter pages = pager + content only */}
+            {isTocPage ? (
+              <div className="handbook-grid">
+                <nav className="handbook-toc">
+                  <h4 style={{ marginTop: 0 }}>Contents</h4>
+                  <ol>
+                    {handbook.chapters.map((c, idx) => (
+                      <li key={c.slug}>
+                        {c.slug === handbook.active.slug ? (
+                          <strong aria-current="page">
+                            {idx + 1}. {c.title}
+                          </strong>
+                        ) : (
+                          <Link href={handbookHref(c.slug)}>
+                            {idx + 1}. {c.title}
+                          </Link>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                </nav>
 
-            <div className="handbook-grid">
-              <nav className="handbook-toc">
-                <h4 style={{ marginTop: 0 }}>Contents</h4>
-                <ol>
-                  {handbook.chapters.map((c) => (
-                    <li key={c.slug}>
-                      {c.slug === handbook.active.slug ? (
-                        <strong aria-current="page">{c.title}</strong>
-                      ) : (
-                        <Link href={handbookHref(c.slug)}>{c.title}</Link>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-              </nav>
+                <article className="handbook-content">
+                  <div className="handbook-pager">
+                    <button
+                      className="button-link button-link--secondary"
+                      disabled
+                      aria-disabled="true"
+                    >
+                      Previous
+                    </button>
 
+                    <button
+                      className="button-link button-link--secondary"
+                      disabled
+                      aria-disabled="true"
+                    >
+                      Table of contents
+                    </button>
+
+                    {handbook.next ? (
+                      <Link
+                        className="button-link button-link--secondary"
+                        href={handbookHref(handbook.next.slug)}
+                      >
+                        Next
+                      </Link>
+                    ) : (
+                      <button
+                        className="button-link button-link--secondary"
+                        disabled
+                        aria-disabled="true"
+                      >
+                        Next
+                      </button>
+                    )}
+                  </div>
+
+                  <div
+                    className="markdown-content"
+                    dangerouslySetInnerHTML={{ __html: handbook.html }}
+                  />
+                </article>
+              </div>
+            ) : (
               <article className="handbook-content">
                 <div className="handbook-pager">
                   {handbook.prev ? (
@@ -499,7 +554,7 @@ export default function AdminDashboardClient(props: {
 
                   <Link
                     className="button-link button-link--secondary"
-                    href={handbookHref(handbook.chapters[0]?.slug ?? "toc")}
+                    href={handbookHref(tocSlug)}
                   >
                     Table of contents
                   </Link>
@@ -522,12 +577,13 @@ export default function AdminDashboardClient(props: {
                   )}
                 </div>
 
+                {/* No extra title here; Markdown owns the chapter heading */}
                 <div
                   className="markdown-content"
                   dangerouslySetInnerHTML={{ __html: handbook.html }}
                 />
               </article>
-            </div>
+            )}
           </div>
         </div>
       </section>
