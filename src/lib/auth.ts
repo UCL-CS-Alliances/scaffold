@@ -12,6 +12,24 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt",
   },
 
+  // Cookie configuration for cross-subdomain SSO
+  cookies: {
+    sessionToken: {
+      name: process.env.NODE_ENV === "production"
+        ? "__Secure-alliances-session"
+        : "alliances-session",
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+        domain: process.env.NODE_ENV === "production"
+          ? ".cs.ucl.ac.uk"
+          : undefined,
+      },
+    },
+  },
+
   providers: [
     CredentialsProvider({
       name: "Credentials",
@@ -24,7 +42,7 @@ export const authOptions: NextAuthOptions = {
           throw new Error("Email and password are required");
         }
 
-const email = credentials.email.trim().toLowerCase();
+        const email = credentials.email.trim().toLowerCase();
         const user = await prisma.user.findUnique({
           where: { email },
           include: {
@@ -37,6 +55,7 @@ const email = credentials.email.trim().toLowerCase();
                 membershipTier: true,
               },
             },
+            organisation: true,
           },
         });
 
@@ -77,9 +96,13 @@ const email = credentials.email.trim().toLowerCase();
           id: user.id,
           email: user.email,
           name: `${user.firstName} ${user.lastName}`,
+          firstName: user.firstName,
+          lastName: user.lastName,
           roleKeys,
           membershipTierKey,
           membershipTierRank,
+          organisationId: user.organisationId,
+          organisationName: user.organisation?.name || null,
         };
       },
     }),
@@ -95,12 +118,18 @@ const email = credentials.email.trim().toLowerCase();
         // Basic identity
         token.id = (user as any).id;
         token.name = user.name;
+        token.firstName = (user as any).firstName;
+        token.lastName = (user as any).lastName;
         token.email = user.email;
 
         // Roles & membership tier
         token.roleKeys = (user as any).roleKeys ?? [];
         token.membershipTierKey = (user as any).membershipTierKey ?? null;
         token.membershipTierRank = (user as any).membershipTierRank ?? null;
+
+        // Organization
+        token.organisationId = (user as any).organisationId ?? null;
+        token.organisationName = (user as any).organisationName ?? null;
       }
       return token;
     },
@@ -113,6 +142,12 @@ const email = credentials.email.trim().toLowerCase();
           (token as any).membershipTierKey ?? null;
         (session.user as any).membershipTierRank =
           (token as any).membershipTierRank ?? null;
+        (session.user as any).firstName = token.firstName;
+        (session.user as any).lastName = token.lastName;
+        (session.user as any).organisationId =
+          (token as any).organisationId ?? null;
+        (session.user as any).organisationName =
+          (token as any).organisationName ?? null;
       }
       return session;
     },
