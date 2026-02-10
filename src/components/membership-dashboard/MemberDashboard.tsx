@@ -155,7 +155,7 @@ export default function MemberDashboard(props: MemberDashboardProps) {
             <dd>{membershipTierLabel}</dd>
           </div>
           <div>
-            <dt>Expires</dt>
+            <dt>End of annual membership</dt>
             <dd>{formattedExpiry}</dd>
           </div>
           <div>
