@@ -340,6 +340,12 @@ async function main() {
 
   const tierIdByYaml = await seedMembershipTiers();
   const roleIdByKey = await seedRoles();
+  const apps = await seedApps();
+  const memberRoleId = roleIdByKey.get('MEMBER');
+
+  if (!memberRoleId) {
+    throw new Error('Expected role "MEMBER" to exist.');
+  }
 
   //
   // Existing MEMBER SEEDING LOOP – unchanged
@@ -372,15 +378,19 @@ async function main() {
         firstName: m.company.contact_first,
         lastName: m.company.contact_last,
         organisationId: organisation.id,
+        defaultAppId: apps.membershipDashboard.id,
       },
       update: {
         firstName: m.company.contact_first,
         lastName: m.company.contact_last,
         organisationId: organisation.id,
         passwordHash,
+        defaultAppId: apps.membershipDashboard.id,
       },
     });
     console.log(`  User id=${user.id}, email=${user.email}`);
+    await assignRole(user.id, memberRoleId);
+    console.log('  Assigned role MEMBER');
 
     const tierId = tierIdByYaml.get(m.membership.tier);
     if (!tierId) {
@@ -448,10 +458,6 @@ async function main() {
     );
   }
 
-  //
-  // NEW: Seed Apps + Rules (AFTER tiers and users exist)
-  //
-  const apps = await seedApps();
   await seedAppAccessRules(apps, tierIdByYaml);
   await seedDemoUsers(apps, roleIdByKey);
 
