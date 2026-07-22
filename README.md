@@ -3,6 +3,42 @@ Welcome to the repository for all Alliances Platform web app development. Initia
 
 ---
 
+## Local database seed data
+
+The Prisma seed script (`prisma/seed.ts`) creates local/preview demo data only. Do not use these credentials in production.
+
+Seeded baseline roles:
+
+- `ADMIN`
+- `MEMBER`
+- `STUDENT`
+- `MODULE_LEADER`
+
+Seeded demo role accounts:
+
+| Role | Email | Password | Default app |
+| --- | --- | --- | --- |
+| Admin | `admin@alliances.example.com` | `admin-demo` | Membership Dashboard |
+| Student | `student@ucl.example.com` | `student-demo` | Talent Discovery |
+| Module Leader | `module.leader@ucl.example.com` | `module-demo` | IXN Workflow Manager |
+
+Seeded partner member accounts:
+
+| Organisation | Email | Password | Tier | Default app |
+| --- | --- | --- | --- | --- |
+| Chanel | `partnerships@chanel.example.com` | `chanel-demo` | Platinum | Membership Dashboard |
+| Microsoft | `engage@microsoft.example.com` | `msft-demo` | Silver | Membership Dashboard |
+| Google | `partnerships@google.example.com` | `google-demo` | Gold | Membership Dashboard |
+| Amazon | `collab@amazon.example.com` | `amazon-demo` | Silver | Membership Dashboard |
+| Meta | `labs@meta.example.com` | `meta-demo` | Silver | Membership Dashboard |
+| Apple | `talent@apple.example.com` | `apple-demo` | Bronze | Membership Dashboard |
+| Google DeepMind | `ai@deepmind.example.com` | `deepmind-demo` | Platinum | Membership Dashboard |
+| Chubb | `innovation@chubb.example.com` | `chubb-demo` | Bronze | Membership Dashboard |
+| Siemens | `partners@siemens.example.com` | `siemens-demo` | Gold | Membership Dashboard |
+| BBC | `rdi@bbc.example.com` | `bbc-demo` | Silver | Membership Dashboard |
+
+The partner accounts are seeded from `prisma/members.yml`, assigned the `MEMBER` role, and given active memberships plus membership dashboard projection rows.
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
