@@ -32,6 +32,8 @@ type RawMember = {
   redeemed_benefits?: string[];
 };
 
+type SeedRoleKey = 'ADMIN' | 'MEMBER' | 'STUDENT' | 'MODULE_LEADER';
+
 const passwordHashCache = new Map<string, string>();
 
 async function hashPassword(plain: string): Promise<string> {
@@ -88,12 +90,14 @@ async function seedMembershipTiers() {
 async function seedRoles() {
   console.log('\nSeeding roles…');
 
-  const roles = [
+  const roles: { key: SeedRoleKey; label: string }[] = [
     { key: 'ADMIN', label: 'Admin' },
     { key: 'MEMBER', label: 'Member' },
     { key: 'STUDENT', label: 'Student' },
     { key: 'MODULE_LEADER', label: 'Module Leader' },
   ];
+
+  const map = new Map<SeedRoleKey, number>();
 
   for (const r of roles) {
     const role = await prisma.role.upsert({
@@ -104,7 +108,26 @@ async function seedRoles() {
       },
     });
     console.log(`  - role ${role.key} -> id=${role.id}`);
+    map.set(r.key, role.id);
   }
+
+  return map;
+}
+
+async function assignRole(userId: string, roleId: number) {
+  await prisma.userRole.upsert({
+    where: {
+      userId_roleId: {
+        userId,
+        roleId,
+      },
+    },
+    create: {
+      userId,
+      roleId,
+    },
+    update: {},
+  });
 }
 
 //
@@ -207,6 +230,93 @@ async function seedAppAccessRules(apps: any, tiers: Map<string, number>) {
   console.log('  - TALENT_DISCOVERY: ALLOW Silver+');
 }
 
+async function seedDemoUsers(
+  apps: Awaited<ReturnType<typeof seedApps>>,
+  roleIdByKey: Map<SeedRoleKey, number>,
+) {
+  console.log('\nSeeding demo users…');
+
+  const organisation = await prisma.organisation.upsert({
+    where: { slug: 'ucl-computer-science' },
+    create: {
+      slug: 'ucl-computer-science',
+      name: 'UCL Computer Science',
+      type: OrganisationType.UNIVERSITY,
+    },
+    update: {
+      name: 'UCL Computer Science',
+      type: OrganisationType.UNIVERSITY,
+    },
+  });
+
+  const demoUsers: {
+    email: string;
+    password: string;
+    firstName: string;
+    lastName: string;
+    roleKey: SeedRoleKey;
+    organisationId: number;
+    defaultAppId: number;
+  }[] = [
+    {
+      email: 'admin@alliances.example.com',
+      password: 'admin-demo',
+      firstName: 'Ada',
+      lastName: 'Admin',
+      roleKey: 'ADMIN',
+      organisationId: organisation.id,
+      defaultAppId: apps.membershipDashboard.id,
+    },
+    {
+      email: 'student@ucl.example.com',
+      password: 'student-demo',
+      firstName: 'Sam',
+      lastName: 'Student',
+      roleKey: 'STUDENT',
+      organisationId: organisation.id,
+      defaultAppId: apps.talent.id,
+    },
+    {
+      email: 'module.leader@ucl.example.com',
+      password: 'module-demo',
+      firstName: 'Morgan',
+      lastName: 'Module Leader',
+      roleKey: 'MODULE_LEADER',
+      organisationId: organisation.id,
+      defaultAppId: apps.ixn.id,
+    },
+  ];
+
+  for (const demoUser of demoUsers) {
+    const roleId = roleIdByKey.get(demoUser.roleKey);
+    if (!roleId) {
+      throw new Error(`Expected role "${demoUser.roleKey}" to exist.`);
+    }
+
+    const user = await prisma.user.upsert({
+      where: { email: demoUser.email },
+      create: {
+        email: demoUser.email,
+        passwordHash: await hashPassword(demoUser.password),
+        firstName: demoUser.firstName,
+        lastName: demoUser.lastName,
+        organisationId: demoUser.organisationId,
+        defaultAppId: demoUser.defaultAppId,
+      },
+      update: {
+        passwordHash: await hashPassword(demoUser.password),
+        firstName: demoUser.firstName,
+        lastName: demoUser.lastName,
+        organisationId: demoUser.organisationId,
+        defaultAppId: demoUser.defaultAppId,
+      },
+    });
+
+    await assignRole(user.id, roleId);
+    console.log(`  - ${demoUser.roleKey}: ${demoUser.email}`);
+  }
+}
+
 //
 // ─────────────────────────────────────────────────────────────
 //   MAIN SEED LOGIC (existing, untouched except final calls)
@@ -229,7 +339,7 @@ async function main() {
   }
 
   const tierIdByYaml = await seedMembershipTiers();
-  await seedRoles();
+  const roleIdByKey = await seedRoles();
 
   //
   // Existing MEMBER SEEDING LOOP – unchanged
@@ -343,6 +453,7 @@ async function main() {
   //
   const apps = await seedApps();
   await seedAppAccessRules(apps, tierIdByYaml);
+  await seedDemoUsers(apps, roleIdByKey);
 
   console.log('\nSeeding complete ✅');
 }
