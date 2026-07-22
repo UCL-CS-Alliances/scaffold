@@ -82,7 +82,34 @@ async function seedMembershipTiers() {
 
 //
 // ─────────────────────────────────────────────────────────────
-//   2. NEW: Seed Apps
+//   2. Seed Roles
+// ─────────────────────────────────────────────────────────────
+//
+async function seedRoles() {
+  console.log('\nSeeding roles…');
+
+  const roles = [
+    { key: 'ADMIN', label: 'Admin' },
+    { key: 'MEMBER', label: 'Member' },
+    { key: 'STUDENT', label: 'Student' },
+    { key: 'MODULE_LEADER', label: 'Module Leader' },
+  ];
+
+  for (const r of roles) {
+    const role = await prisma.role.upsert({
+      where: { key: r.key },
+      create: r,
+      update: {
+        label: r.label,
+      },
+    });
+    console.log(`  - role ${role.key} -> id=${role.id}`);
+  }
+}
+
+//
+// ─────────────────────────────────────────────────────────────
+//   3. NEW: Seed Apps
 // ─────────────────────────────────────────────────────────────
 //
 async function seedApps() {
@@ -129,7 +156,7 @@ async function seedApps() {
 
 //
 // ─────────────────────────────────────────────────────────────
-//   3. NEW: Seed App Access Rules
+//   4. NEW: Seed App Access Rules
 // ─────────────────────────────────────────────────────────────
 //
 // Behaviour required:
@@ -202,6 +229,7 @@ async function main() {
   }
 
   const tierIdByYaml = await seedMembershipTiers();
+  await seedRoles();
 
   //
   // Existing MEMBER SEEDING LOOP – unchanged
