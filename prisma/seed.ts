@@ -185,21 +185,31 @@ async function seedApps() {
 // Behaviour required:
 //
 // - Membership Dashboard: Bronze+
-// - IXN: Silver+
-// - Talent Discovery: Gold+
+// - IXN: Bronze+
+// - Talent Discovery: Silver+
 //
-async function seedAppAccessRules(apps: any, tiers: Map<string, number>) {
+async function seedAppAccessRules(
+  apps: Awaited<ReturnType<typeof seedApps>>,
+  tiers: Map<string, number>,
+) {
   console.log('\nSeeding AppAccessRules…');
 
   const bronzeId = tiers.get('bronze');
   const silverId = tiers.get('silver');
-  const goldId   = tiers.get('gold');
 
-  if (!bronzeId || !silverId || !goldId) {
-    throw new Error('Expected Bronze, Silver, Gold tiers to exist.');
+  if (!bronzeId || !silverId) {
+    throw new Error('Expected Bronze and Silver tiers to exist.');
   }
 
   // MEMBERSHIP DASHBOARD: Bronze+
+  await prisma.appAccessRule.deleteMany({
+    where: {
+      appId: apps.membershipDashboard.id,
+      roleId: null,
+      minMembershipTierId: bronzeId,
+      accessType: 'ALLOW',
+    },
+  });
   await prisma.appAccessRule.create({
     data: {
       appId: apps.membershipDashboard.id,
@@ -210,6 +220,14 @@ async function seedAppAccessRules(apps: any, tiers: Map<string, number>) {
   console.log('  - MEMBERSHIP_DASHBOARD: ALLOW Bronze+');
 
   // IXN: Bronze+
+  await prisma.appAccessRule.deleteMany({
+    where: {
+      appId: apps.ixn.id,
+      roleId: null,
+      minMembershipTierId: bronzeId,
+      accessType: 'ALLOW',
+    },
+  });
   await prisma.appAccessRule.create({
     data: {
       appId: apps.ixn.id,
@@ -220,6 +238,14 @@ async function seedAppAccessRules(apps: any, tiers: Map<string, number>) {
   console.log('  - IXN_WORKFLOW_MANAGER: ALLOW Bronze+');
 
   // Talent Discovery: Silver+
+  await prisma.appAccessRule.deleteMany({
+    where: {
+      appId: apps.talent.id,
+      roleId: null,
+      minMembershipTierId: silverId,
+      accessType: 'ALLOW',
+    },
+  });
   await prisma.appAccessRule.create({
     data: {
       appId: apps.talent.id,
