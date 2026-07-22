@@ -349,8 +349,6 @@ async function seedDemoUsers(
 // ─────────────────────────────────────────────────────────────
 //
 async function main() {
-  console.log('DATABASE_URL =', process.env.DATABASE_URL);
-
   const filePath = path.join(__dirname, 'members.yml');
   console.log('Reading YAML from:', filePath);
 
