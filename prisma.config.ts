@@ -1,16 +1,20 @@
 // prisma.config.ts
-import { defineConfig, env } from "prisma/config";
+import { defineConfig } from "prisma/config";
 import "dotenv/config";
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
-    // 👇 seed command goes here, as a string
-    seed: "ts-node prisma/seed.ts",
+    // tsx runs the TS seed cleanly under Node 24 ESM without the deprecated
+    // `--loader` flag. `tsx` is a devDependency.
+    seed: "tsx prisma/seed.ts",
   },
   engine: "classic",
   datasource: {
-    url: env("DATABASE_URL"),
+    // Migrations/CLI use a direct (session-mode) connection because the
+    // transaction pooler cannot run every operation Prisma Migrate performs.
+    // Falls back to DATABASE_URL for local setups that only define one URL.
+    url: process.env.DIRECT_URL ?? process.env.DATABASE_URL ?? "",
   },
 });
