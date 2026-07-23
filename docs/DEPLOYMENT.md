@@ -12,7 +12,10 @@ Shared runbook for developing, reviewing, and releasing the Alliances Platform o
 
 Auth is NextAuth v4 (credentials + Prisma adapter, JWT sessions). Hosting the database on Supabase does **not** move auth to Supabase Auth.
 
-## How to setup Vercel project (done)
+## First-time Vercel project setup
+
+Complete this after the deployment configuration has been merged into `main`, so
+the first Production build uses the reviewed configuration.
 
 1. In the Strategic Alliances Team Vercel scope, Add New... -> Project and import `UCL-CS-Alliances/scaffold` via the Vercel for GitHub app.
 2. Framework preset: **Next.js** (auto-detected; `vercel.json` pins it and region `lhr1`).
@@ -27,12 +30,12 @@ Auth is NextAuth v4 (credentials + Prisma adapter, JWT sessions). Hosting the da
 | Variable | Local (`.env.local`) | Preview | Production | Notes |
 |---|---|---|---|---|
 | `DATABASE_URL` | pooled `:6543` | ✅ same shared DB | ✅ same shared DB | Runtime. Supavisor **transaction** mode, `pgbouncer=true&connection_limit=1&sslmode=require`. |
-| `DIRECT_URL` | session `:5432` | optional | optional | Prisma CLI (migrate/seed) only. Not used by the Vercel runtime. |
+| `DIRECT_URL` | session `:5432` | — | — | Prisma CLI (migrate/seed) only. Keep it in the deployment owner's ignored `.env.local`; do not add it to Vercel. |
 | `NEXTAUTH_SECRET` | random | ✅ (its own) | ✅ (its own) | Server-only. Use **different** secrets per environment. `openssl rand -base64 32`. |
 | `NEXTAUTH_URL` | `http://localhost:3000` | **unset** | `https://<prod-host>` | Leave unset on Preview so NextAuth uses the per-deployment URL. |
 | `CONTACT_FROM_EMAIL` | optional | optional | optional | Only the From header; email uses Ethereal test accounts until Graph/SMTP is added. |
 
-Set `DATABASE_URL`, `DIRECT_URL` (if stored there), and `NEXTAUTH_SECRET` as Vercel Sensitive variables. A contributor does not need to see or edit these values for Git-based Preview deployments: the deployment owner can configure them once at project level. On Vercel Pro, a Developer can manage Preview/Development variables but not Production variables; keep Production changes with an Owner or Member. Environment-variable changes apply only to new deployments, so redeploy the affected branch after every change.
+Set `DATABASE_URL` and `NEXTAUTH_SECRET` as Vercel Sensitive variables. A contributor does not need to see or edit these values for Git-based Preview deployments: the deployment owner can configure them once at project level. On Vercel Pro, a Developer can manage Preview/Development variables but not Production variables; keep Production changes with an Owner or Member. Environment-variable changes apply only to new deployments, so redeploy the affected branch after every change.
 
 ## Database connections and TLS
 
@@ -104,7 +107,7 @@ The shared database is a temporary cost-saving arrangement. To split:
 
 1. Create a separate Supabase project for Production (never reuse the Preview DB for real data).
 2. Apply the exact migrations already tested in Preview using the Production `DIRECT_URL`; verify the schema before taking traffic.
-3. Replace the Production-scoped `DATABASE_URL`/`DIRECT_URL` in Vercel; leave Preview values unchanged.
+3. Replace the Production-scoped `DATABASE_URL` in Vercel with the new Production project value. Keep the Preview value unchanged; retain the new Production `DIRECT_URL` only in the authorised deployment owner's local environment for migrations.
 4. Redeploy `main`, run the smoke test, and record the tested commit + rollback target.
 
 ## Official references
