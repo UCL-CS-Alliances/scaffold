@@ -3,7 +3,10 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
-import { uniqueOrganisationSlug } from "@/lib/admin-helpers";
+import {
+  parseOrganisationType,
+  uniqueOrganisationSlug,
+} from "@/lib/admin-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +20,10 @@ export async function POST(req: Request) {
 
   const body = await req.json();
   const name = String(body.name ?? "").trim();
-  const type = String(body.type ?? "").trim();
+  const type = parseOrganisationType(body.type);
 
   if (!name) return NextResponse.json({ ok: false, error: "Organisation name is required." }, { status: 400 });
-  if (!["UNIVERSITY", "INDUSTRY", "OTHER"].includes(type)) {
+  if (!type) {
     return NextResponse.json({ ok: false, error: "Organisation type is invalid." }, { status: 400 });
   }
 

@@ -1,4 +1,5 @@
 // src/app/access-denied/page.tsx
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { services } from "@/content/services";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
@@ -142,7 +143,7 @@ if (!appLabel || appLabel === appLabelFallback) {
 
   // Tailored reasons
   let heading = "Access denied";
-  let body: JSX.Element;
+  let body: ReactNode;
 
 if (reason === "register-admin-only") {
   heading = "Register – admin access required";

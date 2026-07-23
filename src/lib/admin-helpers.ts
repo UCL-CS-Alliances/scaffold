@@ -1,4 +1,5 @@
 // src/lib/admin-helpers.ts
+import { OrganisationType } from "@prisma/client";
 import prisma from "@/lib/prisma";
 
 export function slugify(input: string) {
@@ -24,6 +25,15 @@ export async function uniqueOrganisationSlug(base: string) {
     if (!exists) return candidate;
     candidate = `${root}-${i++}`.slice(0, 64);
   }
+}
+
+export function parseOrganisationType(value: unknown): OrganisationType | null {
+  if (typeof value !== "string") return null;
+
+  const candidate = value.trim();
+  return (
+    Object.values(OrganisationType).find((type) => type === candidate) ?? null
+  );
 }
 
 export function parseUkDateOrNull(input: string | undefined | null): Date | null {

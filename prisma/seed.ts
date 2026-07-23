@@ -135,10 +135,13 @@ async function seedApps() {
 // Behaviour required:
 //
 // - Membership Dashboard: Bronze+
-// - IXN: Silver+
-// - Talent Discovery: Gold+
+// - IXN: Bronze+
+// - Talent Discovery: Silver+
 //
-async function seedAppAccessRules(apps: any, tiers: Map<string, number>) {
+async function seedAppAccessRules(
+  apps: Awaited<ReturnType<typeof seedApps>>,
+  tiers: Map<string, number>,
+) {
   console.log('\nSeeding AppAccessRules…');
 
   const bronzeId = tiers.get('bronze');
@@ -149,35 +152,43 @@ async function seedAppAccessRules(apps: any, tiers: Map<string, number>) {
     throw new Error('Expected Bronze, Silver, Gold tiers to exist.');
   }
 
-  // MEMBERSHIP DASHBOARD: Bronze+
-  await prisma.appAccessRule.create({
-    data: {
+  const rules = [
+    {
+      label: 'MEMBERSHIP_DASHBOARD: ALLOW Bronze+',
       appId: apps.membershipDashboard.id,
       minMembershipTierId: bronzeId,
-      accessType: 'ALLOW',
     },
-  });
-  console.log('  - MEMBERSHIP_DASHBOARD: ALLOW Bronze+');
-
-  // IXN: Bronze+
-  await prisma.appAccessRule.create({
-    data: {
+    {
+      label: 'IXN_WORKFLOW_MANAGER: ALLOW Bronze+',
       appId: apps.ixn.id,
       minMembershipTierId: bronzeId,
-      accessType: 'ALLOW',
     },
-  });
-  console.log('  - IXN_WORKFLOW_MANAGER: ALLOW Bronze+');
-
-  // Talent Discovery: Silver+
-  await prisma.appAccessRule.create({
-    data: {
+    {
+      label: 'TALENT_DISCOVERY: ALLOW Silver+',
       appId: apps.talent.id,
       minMembershipTierId: silverId,
-      accessType: 'ALLOW',
     },
-  });
-  console.log('  - TALENT_DISCOVERY: ALLOW Silver+');
+  ];
+
+  for (const rule of rules) {
+    await prisma.$transaction([
+      prisma.appAccessRule.deleteMany({
+        where: {
+          appId: rule.appId,
+          roleId: null,
+          accessType: 'ALLOW',
+        },
+      }),
+      prisma.appAccessRule.create({
+        data: {
+          appId: rule.appId,
+          minMembershipTierId: rule.minMembershipTierId,
+          accessType: 'ALLOW',
+        },
+      }),
+    ]);
+    console.log(`  - ${rule.label}`);
+  }
 }
 
 //
@@ -186,7 +197,7 @@ async function seedAppAccessRules(apps: any, tiers: Map<string, number>) {
 // ─────────────────────────────────────────────────────────────
 //
 async function main() {
-  console.log('DATABASE_URL =', process.env.DATABASE_URL);
+  console.log('Database connection configured:', Boolean(process.env.DATABASE_URL));
 
   const filePath = path.join(__dirname, 'members.yml');
   console.log('Reading YAML from:', filePath);

@@ -1,0 +1,66 @@
+name: Pull Request Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    name: Check, migrate, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      # Ephemeral CI database — both URLs point at the local Postgres service.
+      DATABASE_URL: postgresql://alliances_user:password@localhost:5432/alliances?schema=public
+      DIRECT_URL: postgresql://alliances_user:password@localhost:5432/alliances?schema=public
+      # CI-only dummy so NextAuth-dependent code compiles/builds cleanly.
+      NEXTAUTH_SECRET: ci-dummy-secret-not-used-anywhere
+      NEXTAUTH_URL: http://localhost:3000
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: alliances_user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: alliances
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U alliances_user -d alliances"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # postinstall runs `prisma generate`
+      - run: npm ci
+
+      - name: Apply migrations and seed
+        run: |
+          npm run db:migrate:deploy
+          npm run db:seed
+          npm run db:seed
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Informational until the pre-existing `no-explicit-any` debt is cleared.
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Production build
+        run: npm run build
