@@ -2,7 +2,6 @@ name: Pull Request Checks
 
 on:
   pull_request:
-    branches: [main]
   push:
     branches: [main]
 
@@ -53,15 +52,12 @@ jobs:
         run: |
           npm run db:migrate:deploy
           npm run db:seed
+          npm run db:seed
 
-      # Informational for now: the app carries pre-existing `no-explicit-any`
-      # lint debt and Prisma-typed callbacks. The production build below is the
-      # blocking type gate (Next runs full TypeScript checking during build).
-      # Flip these to blocking (remove continue-on-error) once the debt is clear.
       - name: Typecheck
         run: npm run typecheck
-        continue-on-error: true
 
+      # Informational until the pre-existing `no-explicit-any` debt is cleared.
       - name: Lint
         run: npm run lint
         continue-on-error: true

@@ -1,6 +1,11 @@
 // prisma.config.ts
+import { config } from "dotenv";
 import { defineConfig } from "prisma/config";
-import "dotenv/config";
+
+// Match the documented local workflow: shared defaults first, then ignored
+// machine-local secrets and overrides.
+config({ path: ".env", quiet: true });
+config({ path: ".env.local", override: true, quiet: true });
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
