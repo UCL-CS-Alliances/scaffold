@@ -43,7 +43,7 @@ export async function getHandbookChapters(): Promise<HandbookChapter[]> {
   return chapters;
 }
 
-export async function renderHandbookChapterBySlug(slug: string) {
+export async function renderHandbookChapterBySlug(slug?: string) {
   const chapters = await getHandbookChapters();
   const idx = Math.max(0, chapters.findIndex((c) => c.slug === slug));
   const active = chapters[idx] ?? chapters[0];
@@ -58,3 +58,8 @@ export async function renderHandbookChapterBySlug(slug: string) {
 
   return { chapters, active, html, prev, next };
 }
+
+// Exact return shape of renderHandbookChapterBySlug, exported for consumers.
+export type HandbookRenderResult = Awaited<
+  ReturnType<typeof renderHandbookChapterBySlug>
+>;

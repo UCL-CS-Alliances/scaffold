@@ -2,7 +2,11 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
-import { parseUkDateOrNull, uniqueOrganisationSlug } from "@/lib/admin-helpers";
+import {
+  parseOrganisationType,
+  parseUkDateOrNull,
+  uniqueOrganisationSlug,
+} from "@/lib/admin-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -87,11 +91,11 @@ export async function POST(req: Request) {
       if (isAdmin && admin?.pending?.organisations?.length) {
         for (const o of admin.pending.organisations) {
           const name = String(o.name ?? "").trim();
-          const type = String(o.type ?? "").trim();
+          const type = parseOrganisationType(o.type);
           const clientId = String(o.clientId ?? "").trim();
 
           if (!clientId || !name) throw new Error("Pending organisation is invalid.");
-          if (!["UNIVERSITY", "INDUSTRY", "OTHER"].includes(type)) {
+          if (!type) {
             throw new Error("Organisation type is invalid.");
           }
 

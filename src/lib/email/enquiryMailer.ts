@@ -55,7 +55,7 @@ export async function sendMail(args: SendMailArgs): Promise<SendMailResult> {
     text: args.text,
   });
 
-  const previewUrl = nodemailer.getTestMessageUrl(info) ?? undefined;
+  const previewUrl = nodemailer.getTestMessageUrl(info) || undefined;
 
   return {
     messageId: info.messageId,

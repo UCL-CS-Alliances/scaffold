@@ -93,26 +93,24 @@ const email = credentials.email.trim().toLowerCase();
     async jwt({ token, user }) {
       if (user) {
         // Basic identity
-        token.id = (user as any).id;
+        token.id = user.id;
         token.name = user.name;
         token.email = user.email;
 
         // Roles & membership tier
-        token.roleKeys = (user as any).roleKeys ?? [];
-        token.membershipTierKey = (user as any).membershipTierKey ?? null;
-        token.membershipTierRank = (user as any).membershipTierRank ?? null;
+        token.roleKeys = user.roleKeys ?? [];
+        token.membershipTierKey = user.membershipTierKey ?? null;
+        token.membershipTierRank = user.membershipTierRank ?? null;
       }
       return token;
     },
 
     async session({ session, token }) {
       if (session.user && token) {
-        (session.user as any).id = token.id;
-        (session.user as any).roleKeys = (token as any).roleKeys ?? [];
-        (session.user as any).membershipTierKey =
-          (token as any).membershipTierKey ?? null;
-        (session.user as any).membershipTierRank =
-          (token as any).membershipTierRank ?? null;
+        session.user.id = token.id;
+        session.user.roleKeys = token.roleKeys ?? [];
+        session.user.membershipTierKey = token.membershipTierKey ?? null;
+        session.user.membershipTierRank = token.membershipTierRank ?? null;
       }
       return session;
     },
