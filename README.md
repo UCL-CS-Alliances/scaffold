@@ -16,11 +16,9 @@ Supabase is used as the PostgreSQL host only. The app does not use Supabase Auth
 
 Create a local `.env` file from `.env.example`:
 
-```env
-DATABASE_URL="postgresql://postgres.PROJECT_REF:YOUR_DATABASE_PASSWORD@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?schema=public"
-NEXTAUTH_URL="http://localhost:3000"
-NEXTAUTH_SECRET="replace-with-a-long-random-string"
-```
+See `.env.example` for the full annotated list. At minimum you need a runtime
+connection (`DATABASE_URL`), a migration connection (`DIRECT_URL`, required because
+`prisma/schema.prisma` declares `directUrl`), and the NextAuth variables.
 
 Do not commit `.env` or real database credentials.
 
@@ -29,7 +27,7 @@ Install dependencies and prepare the database:
 ```bash
 npm install
 npm run db:generate
-npm run db:migrate
+npm run db:migrate:dev
 npm run db:seed
 npm run dev
 ```
@@ -39,10 +37,11 @@ Open [http://localhost:3000](http://localhost:3000).
 ## Database Commands
 
 ```bash
-npm run db:generate  # generate Prisma Client
-npm run db:migrate   # apply/create development migrations
-npm run db:seed      # seed preview/local demo data
-npm run db:studio    # inspect data in Prisma Studio
+npm run db:generate       # generate Prisma Client
+npm run db:migrate:dev    # create/apply development migrations
+npm run db:migrate:deploy # apply existing migrations (CI and shared databases)
+npm run db:seed           # seed preview/local demo data
+npm run db:studio         # inspect data in Prisma Studio
 ```
 
 Use Prisma migrations as the source of truth for schema changes. For Supabase, use the session-mode pooler or direct connection for local development and migrations.
@@ -93,4 +92,8 @@ After setup, verify the key local flows:
 - module leader signs in and reaches the IXN Workflow Manager
 - repeated `npm run db:seed` runs do not duplicate baseline app access rules
 
-There is no automated test suite configured yet. Use `npm run lint` for the current static check, noting that existing lint issues may need separate cleanup.
+There is no automated test suite configured yet. Use `npm run typecheck` and `npm run lint` for the current static checks, noting that existing lint issues may need separate cleanup.
+
+## Deployment
+
+The repository uses Vercel Git deployments with a shared Supabase database. For the Preview, Production, migration, environment variable, smoke-test, and rollback workflow, see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).

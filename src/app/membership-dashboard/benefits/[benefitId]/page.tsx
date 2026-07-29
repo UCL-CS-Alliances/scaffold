@@ -68,7 +68,7 @@ export default async function BenefitPage({ params }: PageProps) {
   const session = await getServerAuthSession();
 
   if (session?.user?.id) {
-    const userId = (session.user as any).id;
+    const userId = session.user.id;
 
     const memberData = await getMemberDashboardData(userId);
     if (memberData) {

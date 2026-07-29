@@ -110,7 +110,6 @@ export default function ContactPage() {
   }
 
   async function onSubmit(e: React.FormEvent) {
-    e.dataTransfer;
     e.preventDefault();
     setErrorMsg(null);
     setStatusMsg(null);
