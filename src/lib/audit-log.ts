@@ -20,7 +20,13 @@ import type { Prisma, PrismaClient } from "@prisma/client";
  */
 
 // Schema's AuditLog.action is a bare String; constrain call sites to these.
-export type AuditAction = "CREATE" | "UPDATE" | "DELETE" | "LOGIN";
+export type AuditAction =
+  | "CREATE"
+  | "UPDATE"
+  | "DELETE"
+  | "LOGIN"
+  | "PASSWORD_RESET"
+  | "PASSWORD_CHANGE";
 
 // Accepts the shared client or a transaction client, so callers can include
 // the audit write in an existing $transaction.

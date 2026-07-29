@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import prisma from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
+import { recordAuditLog } from "@/lib/audit-log";
 
 export const dynamic = "force-dynamic";
 
@@ -42,9 +43,26 @@ export async function POST(req: Request) {
   const temp = generateTempPassword(8);
   const passwordHash = await bcrypt.hash(temp, 12);
 
-  await prisma.user.update({
-    where: { id: targetUserId },
-    data: { passwordHash },
+  // Reset and its audit record commit or roll back together. The temp
+  // password and hash are deliberately excluded from the audit data.
+  await prisma.$transaction(async (tx) => {
+    const target = await tx.user.update({
+      where: { id: targetUserId },
+      data: { passwordHash },
+      select: { email: true },
+    });
+
+    await recordAuditLog(tx, {
+      entityType: "User",
+      entityId: targetUserId,
+      action: "PASSWORD_RESET",
+      actorId: session?.user?.id ?? null,
+      data: {
+        targetUserId,
+        targetEmail: target.email,
+        actorEmail: session?.user?.email ?? null,
+      },
+    });
   });
 
   return NextResponse.json({ ok: true, tempPassword: temp }, { status: 200 });
