@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BENEFITS, type BenefitId } from "@/content/benefits";
 import type {
+  AdminBenefitAuditEntry,
   AdminBenefitRedemptionStat,
   AdminMemberListItem,
   AdminSelectedMember,
@@ -28,6 +29,30 @@ function formatDateGB(d: Date | string | null | undefined) {
   return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(date);
 }
 
+function formatDateTimeGB(d: Date | string) {
+  const date = typeof d === "string" ? new Date(d) : d;
+  if (Number.isNaN(date.getTime())) return "Unknown time";
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function benefitLabel(code: string) {
+  return BENEFITS.find((b) => b.id === code)?.label ?? code;
+}
+
+// Actor display for an audit entry; actorId is nulled when the admin account
+// is deleted, so fall back to the email denormalised into the record.
+function auditActorLabel(entry: AdminBenefitAuditEntry) {
+  if (entry.actorDeleted) {
+    return `${entry.actorEmail ?? "Unknown actor"} (deleted account)`;
+  }
+  return entry.actorName
+    ? `${entry.actorName}${entry.actorEmail ? ` (${entry.actorEmail})` : ""}`
+    : entry.actorEmail ?? "Unknown actor";
+}
+
 function tierIcon(tierMin: string) {
   const k = tierMin.toLowerCase();
   if (k.includes("platinum")) return { glyph: "🏆", label: "Platinum tier" };
@@ -41,6 +66,7 @@ export default function AdminDashboardClient(props: {
   selectedUserId: string | null;
   selectedMember: AdminSelectedMember | null;
   benefitStats: AdminBenefitRedemptionStat[];
+  benefitAuditTrail: AdminBenefitAuditEntry[];
   initialTab?: string | null;
   handbook: HandbookRenderResult;
 }) {
@@ -49,6 +75,7 @@ export default function AdminDashboardClient(props: {
     selectedUserId,
     selectedMember,
     benefitStats,
+    benefitAuditTrail,
     initialTab,
     handbook,
   } = props;
@@ -455,6 +482,49 @@ export default function AdminDashboardClient(props: {
                     Save changes
                   </button>
                   {isPending && <span className="small">Saving…</span>}
+                </div>
+
+                <div style={{ marginTop: "1.5rem" }}>
+                  <h4 style={{ marginBottom: ".5rem" }}>
+                    Benefit change history
+                  </h4>
+
+                  {benefitAuditTrail.length === 0 ? (
+                    <p className="small">
+                      No benefit changes have been recorded for this member yet.
+                    </p>
+                  ) : (
+                    <ul className="list-plain">
+                      {benefitAuditTrail.map((entry) => (
+                        <li
+                          key={entry.id}
+                          className="tile"
+                          style={{
+                            padding: ".6rem .75rem",
+                            marginBottom: ".5rem",
+                          }}
+                        >
+                          <div className="small">
+                            {formatDateTimeGB(entry.timestamp)} —{" "}
+                            {auditActorLabel(entry)}
+                          </div>
+
+                          <div className="cluster" style={{ marginTop: ".4rem" }}>
+                            {entry.added.map((code) => (
+                              <span key={`added-${code}`} className="pill">
+                                + {benefitLabel(code)}
+                              </span>
+                            ))}
+                            {entry.removed.map((code) => (
+                              <span key={`removed-${code}`} className="pill">
+                                − {benefitLabel(code)}
+                              </span>
+                            ))}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </>
             )}
