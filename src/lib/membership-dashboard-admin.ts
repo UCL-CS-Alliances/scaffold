@@ -10,8 +10,8 @@ export type AdminMemberListItem = {
   tierLabel: string;
   tierRank: number;
   tierKey: string;
-  // not currently available in schema
-  lastSignedInLabel: string; // "—" for now
+  // Derived from the newest LOGIN audit row; "—" when never signed in.
+  lastSignedInLabel: string;
 };
 
 export type AdminSelectedMember = {
@@ -39,6 +39,16 @@ function requireAdmin(roleKeys: unknown): asserts roleKeys is string[] {
   }
 }
 
+// Sign-ins are moments rather than dates, so the label carries a time — same
+// en-GB style as the admin client's formatDateTimeGB.
+function formatLastSignInLabel(d: Date | null | undefined): string {
+  if (!d) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(d);
+}
+
 export async function getAdminMemberList(): Promise<AdminMemberListItem[]> {
   const memberRole = await prisma.role.findUnique({ where: { key: "MEMBER" } });
 
@@ -60,6 +70,23 @@ export async function getAdminMemberList(): Promise<AdminMemberListItem[]> {
     ],
   });
 
+  // One grouped query for all members' latest LOGIN rows — not one per member.
+  const userIds = memberships.map((m) => m.userId);
+  const latestLogins = userIds.length
+    ? await prisma.auditLog.groupBy({
+        by: ["entityId"],
+        where: {
+          entityType: "User",
+          entityId: { in: userIds },
+          action: "LOGIN",
+        },
+        _max: { timestamp: true },
+      })
+    : [];
+  const lastSignInByUserId = new Map(
+    latestLogins.map((g) => [g.entityId, g._max.timestamp]),
+  );
+
   return memberships.map((m) => ({
     userId: m.userId,
     organisationName: m.organisation.name,
@@ -67,7 +94,7 @@ export async function getAdminMemberList(): Promise<AdminMemberListItem[]> {
     tierLabel: m.membershipTier.label,
     tierRank: m.membershipTier.rank,
     tierKey: m.membershipTier.key,
-    lastSignedInLabel: "—", // schema does not contain this yet
+    lastSignedInLabel: formatLastSignInLabel(lastSignInByUserId.get(m.userId)),
   }));
 }
 
