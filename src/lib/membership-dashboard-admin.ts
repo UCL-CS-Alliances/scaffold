@@ -114,6 +114,55 @@ export async function getAdminSelectedMember(userId: string): Promise<AdminSelec
   };
 }
 
+export type AdminBenefitAuditEntry = {
+  id: string;
+  action: string; // "UPDATE" | "CREATE"
+  timestamp: Date;
+  // Actor from the live relation when it exists; actorId is ON DELETE SET
+  // NULL, so deleted admins fall back to the email denormalised into data.
+  actorName: string | null;
+  actorEmail: string | null;
+  actorDeleted: boolean;
+  previous: string[];
+  next: string[];
+  added: string[];
+  removed: string[];
+};
+
+function asStringArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+export async function getAdminBenefitAuditTrail(
+  userId: string,
+): Promise<AdminBenefitAuditEntry[]> {
+  const rows = await prisma.auditLog.findMany({
+    where: { entityType: "MembershipDashboardMember", entityId: userId },
+    orderBy: { timestamp: "desc" },
+    take: 20,
+    include: { actor: true },
+  });
+
+  return rows.map((r) => {
+    const data = (r.data ?? {}) as Record<string, unknown>;
+    const denormalisedEmail =
+      typeof data.actorEmail === "string" ? data.actorEmail : null;
+
+    return {
+      id: r.id,
+      action: r.action,
+      timestamp: r.timestamp,
+      actorName: r.actor ? `${r.actor.firstName} ${r.actor.lastName}` : null,
+      actorEmail: r.actor?.email ?? denormalisedEmail,
+      actorDeleted: r.actor == null,
+      previous: asStringArray(data.previous),
+      next: asStringArray(data.next),
+      added: asStringArray(data.added),
+      removed: asStringArray(data.removed),
+    };
+  });
+}
+
 // Helper for eligibility in UI (based on selected member rank)
 export function canAccessBenefit(memberRank: number | null, tierMin: MembershipTierKey) {
   if (memberRank == null) return false;
