@@ -39,6 +39,19 @@ export async function saveRedeemedBenefitsAction(input: {
 
   const existing = user.membershipDashboardMember;
 
+  // Diff against the stored set: the action replaces the whole array, so the
+  // audit record (wired up in a follow-up commit) needs added/removed computed
+  // here rather than just the new value.
+  const previous = existing?.redeemedBenefitCodes ?? [];
+  const previousSet = new Set<string>(previous);
+  const nextSet = new Set<string>(input.redeemedBenefitCodes);
+  const added = input.redeemedBenefitCodes.filter(
+    (code) => !previousSet.has(code)
+  );
+  const removed = previous.filter((code) => !nextSet.has(code));
+  void added;
+  void removed;
+
   if (existing) {
     await prisma.membershipDashboardMember.update({
       where: { id: existing.id },
