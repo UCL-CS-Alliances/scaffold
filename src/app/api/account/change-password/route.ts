@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import prisma from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
+import { recordAuditLog } from "@/lib/audit-log";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
 
   const user = await prisma.user.findUnique({
     where: { id: me.id as string },
-    select: { passwordHash: true },
+    select: { passwordHash: true, email: true },
   });
 
   if (!user) return NextResponse.json({ ok: false, error: "User not found." }, { status: 404 });
@@ -48,9 +49,26 @@ export async function POST(req: Request) {
 
   const passwordHash = await bcrypt.hash(newPassword, 12);
 
-  await prisma.user.update({
-    where: { id: me.id as string },
-    data: { passwordHash },
+  // Change and its audit record commit or roll back together. Neither
+  // password nor either hash appears in the audit data. Failed attempts
+  // (wrong current password) are not audited — the trail records changes.
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: me.id as string },
+      data: { passwordHash },
+    });
+
+    await recordAuditLog(tx, {
+      entityType: "User",
+      entityId: String(me.id),
+      action: "PASSWORD_CHANGE",
+      actorId: String(me.id),
+      data: {
+        targetUserId: String(me.id),
+        targetEmail: user.email,
+        actorEmail: user.email,
+      },
+    });
   });
 
   return NextResponse.json({ ok: true }, { status: 200 });
