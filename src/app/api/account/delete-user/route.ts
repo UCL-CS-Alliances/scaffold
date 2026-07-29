@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
+import { recordAuditLog } from "@/lib/audit-log";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,30 @@ export async function POST(req: Request) {
 
   try {
     await prisma.$transaction(async (tx) => {
+      // Snapshot the target into the audit record before it disappears; the
+      // row itself must be written before the delete because a self-deleting
+      // user's actorId is nulled by the FK's ON DELETE SET NULL.
+      const target = await tx.user.findUnique({
+        where: { id: targetUserId },
+        select: { email: true, firstName: true, lastName: true },
+      });
+
+      if (target) {
+        await recordAuditLog(tx, {
+          entityType: "User",
+          entityId: targetUserId,
+          action: "DELETE",
+          actorId: String(me.id),
+          data: {
+            targetUserId,
+            targetEmail: target.email,
+            targetName: `${target.firstName} ${target.lastName}`,
+            actorEmail: session?.user?.email ?? null,
+            selfDelete: deletingSelf,
+          },
+        });
+      }
+
       // Delete dependents first (prevents FK constraint failures)
       await tx.userRole.deleteMany({ where: { userId: targetUserId } });
       await tx.membership.deleteMany({ where: { userId: targetUserId } });
