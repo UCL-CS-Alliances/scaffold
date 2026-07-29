@@ -2,7 +2,8 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
-import type { AuditLogClient } from "@/lib/audit-log";
+import type { Prisma } from "@prisma/client";
+import { recordAuditLog, type AuditLogClient } from "@/lib/audit-log";
 import {
   parseOrganisationType,
   parseUkDateOrNull,
@@ -378,11 +379,25 @@ export async function POST(req: Request) {
         }
       }
 
-      // 6) Post-change snapshot + diff for the audit record (wired up in a
-      // follow-up commit).
+      // 6) Audit record: one row per save, skipped when nothing changed.
       const after = await getUserAuditSnapshot(tx, targetUserId);
-      const changes = before && after ? diffUserSnapshots(before, after) : null;
-      void changes;
+      if (before && after) {
+        const changes = diffUserSnapshots(before, after);
+        if (Object.keys(changes).length) {
+          await recordAuditLog(tx, {
+            entityType: "User",
+            entityId: targetUserId,
+            action: "UPDATE",
+            actorId: String(me.id),
+            data: {
+              targetUserId,
+              targetEmail: after.email,
+              actorEmail: session?.user?.email ?? null,
+              changes: changes as Prisma.InputJsonValue,
+            },
+          });
+        }
+      }
     });
 
     const adminDemoted = editingSelf && wasAdmin && !isAdminAfterSave;
