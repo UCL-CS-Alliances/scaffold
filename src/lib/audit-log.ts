@@ -1,4 +1,5 @@
 // src/lib/audit-log.ts
+import { headers } from "next/headers";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 /**
@@ -35,10 +36,37 @@ export type RecordAuditLogInput = {
   userAgent?: string | null;
 };
 
+export type AuditRequestMetadata = {
+  ipAddress: string | null;
+  userAgent: string | null;
+};
+
+// Best-effort request metadata capture: headers() (awaited — Next 16) only
+// exists in a request scope, so scripts/seed callers get nulls rather than a
+// throw. x-forwarded-for handling mirrors the contact submit route.
+export async function getAuditRequestMetadata(): Promise<AuditRequestMetadata> {
+  try {
+    const h = await headers();
+    const xff = h.get("x-forwarded-for");
+    const ipAddress = xff
+      ? xff.split(",")[0]?.trim() || null
+      : h.get("x-real-ip");
+    return { ipAddress, userAgent: h.get("user-agent") };
+  } catch {
+    return { ipAddress: null, userAgent: null };
+  }
+}
+
 export async function recordAuditLog(
   client: AuditLogClient,
   input: RecordAuditLogInput
 ) {
+  // Capture request metadata unless the caller supplied either field.
+  const metadata =
+    input.ipAddress !== undefined || input.userAgent !== undefined
+      ? { ipAddress: input.ipAddress ?? null, userAgent: input.userAgent ?? null }
+      : await getAuditRequestMetadata();
+
   return client.auditLog.create({
     data: {
       entityType: input.entityType,
@@ -46,8 +74,8 @@ export async function recordAuditLog(
       action: input.action,
       actorId: input.actorId,
       data: input.data,
-      ipAddress: input.ipAddress ?? null,
-      userAgent: input.userAgent ?? null,
+      ipAddress: metadata.ipAddress,
+      userAgent: metadata.userAgent,
     },
   });
 }
