@@ -52,23 +52,27 @@ export async function saveRedeemedBenefitsAction(input: {
   void added;
   void removed;
 
-  if (existing) {
-    await prisma.membershipDashboardMember.update({
-      where: { id: existing.id },
-      data: { redeemedBenefitCodes: input.redeemedBenefitCodes },
+  // Transactional so the audit write (added in a follow-up commit) cannot
+  // diverge from the redemption change.
+  await prisma.$transaction(async (tx) => {
+    if (existing) {
+      await tx.membershipDashboardMember.update({
+        where: { id: existing.id },
+        data: { redeemedBenefitCodes: input.redeemedBenefitCodes },
+      });
+      return;
+    }
+
+    const activeMembership = user.memberships.at(0) ?? null;
+    const memberKey = user.organisation?.slug ?? `user-${user.id.slice(0, 12)}`;
+
+    await tx.membershipDashboardMember.create({
+      data: {
+        userId: user.id,
+        membershipId: activeMembership?.id ?? null,
+        memberKey,
+        redeemedBenefitCodes: input.redeemedBenefitCodes,
+      },
     });
-    return;
-  }
-
-  const activeMembership = user.memberships.at(0) ?? null;
-  const memberKey = user.organisation?.slug ?? `user-${user.id.slice(0, 12)}`;
-
-  await prisma.membershipDashboardMember.create({
-    data: {
-      userId: user.id,
-      membershipId: activeMembership?.id ?? null,
-      memberKey,
-      redeemedBenefitCodes: input.redeemedBenefitCodes,
-    },
   });
 }
