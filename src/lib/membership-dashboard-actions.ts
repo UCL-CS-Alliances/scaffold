@@ -3,6 +3,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
+import { recordAuditLog } from "@/lib/audit-log";
 import { BENEFITS, type BenefitId } from "@/content/benefits";
 
 function requireAdmin(roleKeys: unknown) {
@@ -19,6 +20,11 @@ export async function saveRedeemedBenefitsAction(input: {
   const session = await getServerAuthSession();
   const roleKeys = (session?.user as any)?.roleKeys;
   requireAdmin(roleKeys);
+
+  // Actor for the audit record. Email is denormalised into the record's data
+  // because AuditLog.actorId is ON DELETE SET NULL.
+  const actorId = session?.user?.id ?? null;
+  const actorEmail = session?.user?.email ?? null;
 
   // Validate benefit ids exist
   const allowed = new Set(BENEFITS.map((b) => b.id));
@@ -40,8 +46,8 @@ export async function saveRedeemedBenefitsAction(input: {
   const existing = user.membershipDashboardMember;
 
   // Diff against the stored set: the action replaces the whole array, so the
-  // audit record (wired up in a follow-up commit) needs added/removed computed
-  // here rather than just the new value.
+  // audit record needs added/removed computed here rather than just the new
+  // value.
   const previous = existing?.redeemedBenefitCodes ?? [];
   const previousSet = new Set<string>(previous);
   const nextSet = new Set<string>(input.redeemedBenefitCodes);
@@ -49,17 +55,38 @@ export async function saveRedeemedBenefitsAction(input: {
     (code) => !previousSet.has(code)
   );
   const removed = previous.filter((code) => !nextSet.has(code));
-  void added;
-  void removed;
 
-  // Transactional so the audit write (added in a follow-up commit) cannot
-  // diverge from the redemption change.
+  // No-op saves (the UI can submit an unchanged set) still persist but are
+  // not audited, so the trail only contains actual changes.
+  const hasChanges = added.length > 0 || removed.length > 0;
+
+  // Transactional so the redemption change and its audit record commit or
+  // roll back together.
   await prisma.$transaction(async (tx) => {
     if (existing) {
       await tx.membershipDashboardMember.update({
         where: { id: existing.id },
         data: { redeemedBenefitCodes: input.redeemedBenefitCodes },
       });
+      if (hasChanges) {
+        await recordAuditLog(tx, {
+          entityType: "MembershipDashboardMember",
+          // Target User.id, not the projection row id, so member-history
+          // queries hit the (entityType, entityId) index.
+          entityId: user.id,
+          action: "UPDATE",
+          actorId,
+          data: {
+            targetUserId: user.id,
+            memberKey: existing.memberKey,
+            actorEmail,
+            previous,
+            next: input.redeemedBenefitCodes,
+            added,
+            removed,
+          },
+        });
+      }
       return;
     }
 
@@ -74,5 +101,23 @@ export async function saveRedeemedBenefitsAction(input: {
         redeemedBenefitCodes: input.redeemedBenefitCodes,
       },
     });
+
+    if (hasChanges) {
+      await recordAuditLog(tx, {
+        entityType: "MembershipDashboardMember",
+        entityId: user.id,
+        action: "CREATE",
+        actorId,
+        data: {
+          targetUserId: user.id,
+          memberKey,
+          actorEmail,
+          previous,
+          next: input.redeemedBenefitCodes,
+          added,
+          removed,
+        },
+      });
+    }
   });
 }
