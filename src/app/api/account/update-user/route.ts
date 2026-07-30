@@ -2,6 +2,8 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
+import type { Prisma } from "@prisma/client";
+import { recordAuditLog, type AuditLogClient } from "@/lib/audit-log";
 import {
   parseOrganisationType,
   parseUkDateOrNull,
@@ -18,6 +20,117 @@ function parseNullableNumber(value: any): number | null {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+// State captured before and after the save; the audit record's diff is
+// computed between the two rather than reconstructed from the request body.
+type UserAuditSnapshot = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  defaultAppId: number | null;
+  organisationId: number | null;
+  roleKeys: string[];
+  membership: {
+    membershipTierId: number;
+    organisationId: number;
+    isActive: boolean;
+    status: string;
+    managerName: string | null;
+    expiry: string | null;
+  } | null;
+};
+
+async function getUserAuditSnapshot(
+  client: AuditLogClient,
+  userId: string,
+): Promise<UserAuditSnapshot | null> {
+  const user = await client.user.findUnique({
+    where: { id: userId },
+    select: {
+      firstName: true,
+      lastName: true,
+      email: true,
+      defaultAppId: true,
+      organisationId: true,
+      roles: { select: { role: { select: { key: true } } } },
+      memberships: {
+        where: { isActive: true },
+        select: {
+          membershipTierId: true,
+          organisationId: true,
+          isActive: true,
+          status: true,
+          managerName: true,
+          expiry: true,
+        },
+      },
+    },
+  });
+
+  if (!user) return null;
+
+  const membership = user.memberships.at(0) ?? null;
+
+  return {
+    firstName: user.firstName,
+    lastName: user.lastName,
+    email: user.email,
+    defaultAppId: user.defaultAppId,
+    organisationId: user.organisationId,
+    roleKeys: user.roles.map((r) => r.role.key).sort(),
+    membership: membership
+      ? {
+          membershipTierId: membership.membershipTierId,
+          organisationId: membership.organisationId,
+          isActive: membership.isActive,
+          status: membership.status,
+          managerName: membership.managerName,
+          expiry: membership.expiry ? membership.expiry.toISOString() : null,
+        }
+      : null,
+  };
+}
+
+// Sectioned diff: only sections that actually changed appear in the result.
+function diffUserSnapshots(before: UserAuditSnapshot, after: UserAuditSnapshot) {
+  const changes: Record<string, unknown> = {};
+
+  const userFields = [
+    "firstName",
+    "lastName",
+    "email",
+    "defaultAppId",
+    "organisationId",
+  ] as const;
+  const previousUser: Record<string, unknown> = {};
+  const nextUser: Record<string, unknown> = {};
+  for (const field of userFields) {
+    if (before[field] !== after[field]) {
+      previousUser[field] = before[field];
+      nextUser[field] = after[field];
+    }
+  }
+  if (Object.keys(nextUser).length) {
+    changes.user = { previous: previousUser, next: nextUser };
+  }
+
+  const beforeRoles = new Set(before.roleKeys);
+  const afterRoles = new Set(after.roleKeys);
+  const rolesAdded = after.roleKeys.filter((k) => !beforeRoles.has(k));
+  const rolesRemoved = before.roleKeys.filter((k) => !afterRoles.has(k));
+  if (rolesAdded.length || rolesRemoved.length) {
+    changes.roles = { added: rolesAdded, removed: rolesRemoved };
+  }
+
+  if (JSON.stringify(before.membership) !== JSON.stringify(after.membership)) {
+    changes.membership = {
+      previous: before.membership,
+      next: after.membership,
+    };
+  }
+
+  return changes;
 }
 
 export async function POST(req: Request) {
@@ -70,13 +183,12 @@ export async function POST(req: Request) {
   const admin = body.admin ?? null;
   const editingSelf = targetUserId === String(me.id);
 
+  // Pre-change snapshot: feeds the audit diff and the wasAdmin check.
+  const before = await getUserAuditSnapshot(prisma, targetUserId);
+
   let wasAdmin = false;
   if (isAdmin && editingSelf) {
-    const prev = await prisma.user.findUnique({
-      where: { id: targetUserId },
-      select: { roles: { select: { role: { select: { key: true } } } } },
-    });
-    wasAdmin = (prev?.roles ?? []).some((r) => r.role.key === "ADMIN");
+    wasAdmin = (before?.roleKeys ?? []).includes("ADMIN");
   }
 
   // NEW: make available outside transaction for response
@@ -262,6 +374,26 @@ export async function POST(req: Request) {
               status,
               managerName,
               expiry,
+            },
+          });
+        }
+      }
+
+      // 6) Audit record: one row per save, skipped when nothing changed.
+      const after = await getUserAuditSnapshot(tx, targetUserId);
+      if (before && after) {
+        const changes = diffUserSnapshots(before, after);
+        if (Object.keys(changes).length) {
+          await recordAuditLog(tx, {
+            entityType: "User",
+            entityId: targetUserId,
+            action: "UPDATE",
+            actorId: String(me.id),
+            data: {
+              targetUserId,
+              targetEmail: after.email,
+              actorEmail: session?.user?.email ?? null,
+              changes: changes as Prisma.InputJsonValue,
             },
           });
         }

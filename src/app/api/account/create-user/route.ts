@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import prisma from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
+import { recordAuditLog } from "@/lib/audit-log";
 
 export const dynamic = "force-dynamic";
 
@@ -46,14 +47,34 @@ export async function POST(req: Request) {
   const passwordHash = await bcrypt.hash(tempPassword, 12);
 
   try {
-    const created = await prisma.user.create({
-      data: {
-        email,
-        firstName,
-        lastName,
-        passwordHash,
-      },
-      select: { id: true },
+    // Creation and its audit record commit or roll back together. The temp
+    // password and hash are deliberately excluded from the audit data.
+    const created = await prisma.$transaction(async (tx) => {
+      const createdUser = await tx.user.create({
+        data: {
+          email,
+          firstName,
+          lastName,
+          passwordHash,
+        },
+        select: { id: true },
+      });
+
+      await recordAuditLog(tx, {
+        entityType: "User",
+        entityId: createdUser.id,
+        action: "CREATE",
+        actorId: session?.user?.id ?? null,
+        data: {
+          targetUserId: createdUser.id,
+          actorEmail: session?.user?.email ?? null,
+          email,
+          firstName,
+          lastName,
+        },
+      });
+
+      return createdUser;
     });
 
     return NextResponse.json(

@@ -8,6 +8,7 @@ import {
   getMemberDashboardData,
 } from "@/lib/membership-dashboard";
 import {
+  getAdminBenefitAuditTrail,
   getAdminBenefitRedemptionStats,
   getAdminMemberList,
   getAdminSelectedMember,
@@ -86,17 +87,27 @@ export default async function MembershipDashboardPage(props: Props) {
     const tab = pickFirst(sp?.tab) ?? null; // "members" | "benefits" | "handbook"
     const chapter = pickFirst(sp?.chapter) ?? null;
 
-    const [summary, members, selectedMember, benefitStats, handbook, totalUsers] =
-      await Promise.all([
-        getAdminDashboardSummary(),
-        getAdminMemberList(),
-        selectedUserId
-          ? getAdminSelectedMember(selectedUserId)
-          : Promise.resolve(null),
-        getAdminBenefitRedemptionStats(),
-        renderHandbookChapterBySlug(chapter ?? undefined),
-        prisma.user.count(),
-      ]);
+    const [
+      summary,
+      members,
+      selectedMember,
+      benefitStats,
+      handbook,
+      totalUsers,
+      benefitAuditTrail,
+    ] = await Promise.all([
+      getAdminDashboardSummary(),
+      getAdminMemberList(),
+      selectedUserId
+        ? getAdminSelectedMember(selectedUserId)
+        : Promise.resolve(null),
+      getAdminBenefitRedemptionStats(),
+      renderHandbookChapterBySlug(chapter ?? undefined),
+      prisma.user.count(),
+      selectedUserId
+        ? getAdminBenefitAuditTrail(selectedUserId)
+        : Promise.resolve([]),
+    ]);
 
     const payingRevenue = computeRevenueFromTiers(summary.tiers);
 
@@ -128,6 +139,7 @@ export default async function MembershipDashboardPage(props: Props) {
         selectedUserId={selectedUserId}
         selectedMember={selectedMember}
         benefitStats={benefitStats}
+        benefitAuditTrail={benefitAuditTrail}
         initialTab={tab}
         handbook={handbook}
       />

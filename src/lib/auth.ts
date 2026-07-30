@@ -4,6 +4,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { recordAuditLog } from "@/lib/audit-log";
 
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
@@ -90,6 +91,28 @@ const email = credentials.email.trim().toLowerCase();
   },
 
   callbacks: {
+    // Runs once per successful sign-in for any provider (not on JWT session
+    // refreshes). Unlike the mutation call sites, the audit write here is
+    // fire-and-forget: a failed write must never block sign-in.
+    async signIn({ user }) {
+      try {
+        await recordAuditLog(prisma, {
+          entityType: "User",
+          entityId: user.id,
+          action: "LOGIN",
+          actorId: user.id,
+          data: {
+            targetUserId: user.id,
+            targetEmail: user.email ?? null,
+            actorEmail: user.email ?? null,
+          },
+        });
+      } catch (error) {
+        console.error("Failed to record LOGIN audit entry:", error);
+      }
+      return true;
+    },
+
     async jwt({ token, user }) {
       if (user) {
         // Basic identity

@@ -2,6 +2,7 @@
 import AdminDashboardClient from "./AdminDashboardClient";
 import type { AdminDashboardSummary } from "@/lib/membership-dashboard";
 import type {
+  AdminBenefitAuditEntry,
   AdminBenefitRedemptionStat,
   AdminMemberListItem,
   AdminSelectedMember,
@@ -21,6 +22,7 @@ type AdminDashboardProps = AdminDashboardSummary & {
   selectedMember: AdminSelectedMember | null;
 
   benefitStats: AdminBenefitRedemptionStat[];
+  benefitAuditTrail: AdminBenefitAuditEntry[];
 
   initialTab?: string | null;
   handbook: HandbookRenderResult;
@@ -45,6 +47,7 @@ export default function AdminDashboard({
   selectedUserId = null,
   selectedMember,
   benefitStats,
+  benefitAuditTrail,
   initialTab = null,
   handbook,
 }: AdminDashboardProps) {
@@ -73,6 +76,7 @@ export default function AdminDashboard({
           selectedUserId={selectedUserId}
           selectedMember={selectedMember}
           benefitStats={benefitStats}
+          benefitAuditTrail={benefitAuditTrail}
           initialTab={initialTab}
           handbook={handbook}
         />
