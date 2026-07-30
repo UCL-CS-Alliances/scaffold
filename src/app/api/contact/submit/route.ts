@@ -190,7 +190,7 @@ enquiriesTrelloBoardEmail
   // const to = manager.email;
   // const cc = [email, enquiriesTrelloBoardEmail];
   const to = email;
-  const cc = [email];
+  const cc = [enquiriesTrelloBoardEmail];
 
   try {
     const result = await sendMailgun({
