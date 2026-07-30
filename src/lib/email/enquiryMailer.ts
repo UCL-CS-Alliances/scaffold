@@ -1,5 +1,7 @@
 // src/lib/email/enquiryMailer.ts
 import nodemailer, { Transporter } from "nodemailer";
+import FormData from "form-data";
+import Mailgun from "mailgun.js"; 
 
 type SendMailArgs = {
   from: string;
@@ -61,6 +63,22 @@ export async function sendMail(args: SendMailArgs): Promise<SendMailResult> {
     messageId: info.messageId,
     previewUrl,
   };
+}
+
+export async function sendMailgun(args: SendMailArgs) {
+  const mailgun = new Mailgun(FormData);
+  const mg = mailgun.client({
+    username: "api",
+    key: process.env.MAILGUN_API_KEY!
+  });
+
+  const data = await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
+    from: args.from,
+    to: args.to,
+    cc: args.cc,
+    subject: args.subject,
+    text: args.text,
+  });
 }
 
 /**

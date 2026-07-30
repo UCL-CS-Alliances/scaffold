@@ -1,4 +1,6 @@
 // src/app/api/contact/submit/route.ts
+import "dotenv/config";
+
 import { NextResponse } from "next/server";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import {
@@ -7,7 +9,10 @@ import {
   resolveManagerByName,
   resolveTopicByLabel,
 } from "@/content/contactRouting";
-import { sendMail } from "@/lib/email/enquiryMailer";
+import { 
+  sendMail, 
+  sendMailgun, 
+} from "@/lib/email/enquiryMailer";
 import crypto from "crypto";
 
 export const runtime = "nodejs";
@@ -180,13 +185,15 @@ export async function POST(req: Request) {
   ].join("\n");
 
   const from =
-    process.env.CONTACT_FROM_EMAIL?.trim() || `Alliances Platform <no-reply@alliances.local>`;
-
-  const to = manager.email;
-  const cc = [email, enquiriesTrelloBoardEmail];
+    process.env.MAILGUN_SENDING_EMAIL!; //?.trim() || `Alliances Platform <no-reply@alliances.local>`;
+enquiriesTrelloBoardEmail
+  // const to = manager.email;
+  // const cc = [email, enquiriesTrelloBoardEmail];
+  const to = email;
+  const cc = [email];
 
   try {
-    const result = await sendMail({
+    const result = await sendMailgun({
       from,
       to,
       cc,
@@ -198,7 +205,6 @@ export async function POST(req: Request) {
       ok: true,
       ticketId,
       managerName: manager.name,
-      etherealPreviewUrl: result.previewUrl ?? null,
     });
   } catch (err) {
     console.error("Enquiry send failed:", err);
