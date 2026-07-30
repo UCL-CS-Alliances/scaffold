@@ -10,8 +10,8 @@ export type AdminMemberListItem = {
   tierLabel: string;
   tierRank: number;
   tierKey: string;
-  // not currently available in schema
-  lastSignedInLabel: string; // "—" for now
+  // Derived from the newest LOGIN audit row; "—" when never signed in.
+  lastSignedInLabel: string;
 };
 
 export type AdminSelectedMember = {
@@ -39,6 +39,16 @@ function requireAdmin(roleKeys: unknown): asserts roleKeys is string[] {
   }
 }
 
+// Sign-ins are moments rather than dates, so the label carries a time — same
+// en-GB style as the admin client's formatDateTimeGB.
+function formatLastSignInLabel(d: Date | null | undefined): string {
+  if (!d) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(d);
+}
+
 export async function getAdminMemberList(): Promise<AdminMemberListItem[]> {
   const memberRole = await prisma.role.findUnique({ where: { key: "MEMBER" } });
 
@@ -60,6 +70,23 @@ export async function getAdminMemberList(): Promise<AdminMemberListItem[]> {
     ],
   });
 
+  // One grouped query for all members' latest LOGIN rows — not one per member.
+  const userIds = memberships.map((m) => m.userId);
+  const latestLogins = userIds.length
+    ? await prisma.auditLog.groupBy({
+        by: ["entityId"],
+        where: {
+          entityType: "User",
+          entityId: { in: userIds },
+          action: "LOGIN",
+        },
+        _max: { timestamp: true },
+      })
+    : [];
+  const lastSignInByUserId = new Map(
+    latestLogins.map((g) => [g.entityId, g._max.timestamp]),
+  );
+
   return memberships.map((m) => ({
     userId: m.userId,
     organisationName: m.organisation.name,
@@ -67,7 +94,7 @@ export async function getAdminMemberList(): Promise<AdminMemberListItem[]> {
     tierLabel: m.membershipTier.label,
     tierRank: m.membershipTier.rank,
     tierKey: m.membershipTier.key,
-    lastSignedInLabel: "—", // schema does not contain this yet
+    lastSignedInLabel: formatLastSignInLabel(lastSignInByUserId.get(m.userId)),
   }));
 }
 
@@ -112,6 +139,55 @@ export async function getAdminSelectedMember(userId: string): Promise<AdminSelec
 
     redeemedBenefitCodes: redeemed,
   };
+}
+
+export type AdminBenefitAuditEntry = {
+  id: string;
+  action: string; // "UPDATE" | "CREATE"
+  timestamp: Date;
+  // Actor from the live relation when it exists; actorId is ON DELETE SET
+  // NULL, so deleted admins fall back to the email denormalised into data.
+  actorName: string | null;
+  actorEmail: string | null;
+  actorDeleted: boolean;
+  previous: string[];
+  next: string[];
+  added: string[];
+  removed: string[];
+};
+
+function asStringArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+export async function getAdminBenefitAuditTrail(
+  userId: string,
+): Promise<AdminBenefitAuditEntry[]> {
+  const rows = await prisma.auditLog.findMany({
+    where: { entityType: "MembershipDashboardMember", entityId: userId },
+    orderBy: { timestamp: "desc" },
+    take: 20,
+    include: { actor: true },
+  });
+
+  return rows.map((r) => {
+    const data = (r.data ?? {}) as Record<string, unknown>;
+    const denormalisedEmail =
+      typeof data.actorEmail === "string" ? data.actorEmail : null;
+
+    return {
+      id: r.id,
+      action: r.action,
+      timestamp: r.timestamp,
+      actorName: r.actor ? `${r.actor.firstName} ${r.actor.lastName}` : null,
+      actorEmail: r.actor?.email ?? denormalisedEmail,
+      actorDeleted: r.actor == null,
+      previous: asStringArray(data.previous),
+      next: asStringArray(data.next),
+      added: asStringArray(data.added),
+      removed: asStringArray(data.removed),
+    };
+  });
 }
 
 // Helper for eligibility in UI (based on selected member rank)
