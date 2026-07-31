@@ -28,6 +28,8 @@
     "@prisma/client": "6.19.3",
     "@types/bcryptjs": "^2.4.6",
     "bcryptjs": "^3.0.3",
+    "form-data": "^4.0.6",
+    "mailgun.js": "^13.3.0",
     "next": "16.2.11",
     "next-auth": "4.24.15",
     "nodemailer": "^7.0.13",
