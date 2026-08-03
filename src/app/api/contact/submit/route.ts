@@ -186,13 +186,14 @@ export async function POST(req: Request) {
 
   const from =
     process.env.MAILGUN_SENDING_EMAIL!; //?.trim() || `Alliances Platform <no-reply@alliances.local>`;
-enquiriesTrelloBoardEmail
   // const to = manager.email;
   // const cc = [email, enquiriesTrelloBoardEmail];
   const to = email;
-  const cc = [enquiriesTrelloBoardEmail];
+  const cc = [email,enquiriesTrelloBoardEmail];
 
   try {
+    console.log("Mailgun sending email:", process.env.MAILGUN_SENDING_EMAIL);
+    console.log("Type:", typeof process.env.MAILGUN_SENDING_EMAIL);
     const result = await sendMailgun({
       from,
       to,
