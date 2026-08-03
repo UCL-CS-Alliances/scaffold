@@ -2,6 +2,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import UserProfileForm from "@/components/account/UserProfileForm";
 
 type Me = { id: string; email: string; firstName: string; lastName: string };
@@ -25,8 +26,11 @@ export default function AccountPageClient(props: {
 }) {
   const { me, isAdmin, adminData, initialSelectedUserId, initialTempPassword, appsMeta } = props;
 
+  const router = useRouter();
+
   const [selectedUserId, setSelectedUserId] = useState(initialSelectedUserId);
   const [tempPassword, setTempPassword] = useState<string | null>(initialTempPassword);
+  const [deletedNotice, setDeletedNotice] = useState<string | null>(null);
 
   const selectedLabel = useMemo(() => {
     if (!adminData) return null;
@@ -65,6 +69,7 @@ export default function AccountPageClient(props: {
               onChange={(e) => {
                 setSelectedUserId(e.target.value);
                 setTempPassword(null);
+                setDeletedNotice(null);
               }}
               style={{ width: "min(28rem, 100%)" }}
             >
@@ -75,6 +80,12 @@ export default function AccountPageClient(props: {
               ))}
             </select>
           </div>
+
+          {deletedNotice && (
+            <p role="status" className="small" style={{ marginTop: "0.75rem" }}>
+              <strong>{deletedNotice}</strong>
+            </p>
+          )}
 
           {selectedLabel && (
             <p className="small" style={{ marginTop: "0.75rem" }}>
@@ -92,6 +103,14 @@ export default function AccountPageClient(props: {
         appsMeta={appsMeta}
         initialSelf={me}
         initialTempPassword={tempPassword ?? undefined}
+        onUserDeleted={() => {
+          // Name the user before dropping the selection — selectedLabel is
+          // derived from it, and the refreshed list will no longer contain them.
+          setDeletedNotice(`Deleted ${selectedLabel ?? "user"}.`);
+          setSelectedUserId(me.id);
+          setTempPassword(null);
+          router.refresh();
+        }}
       />
     </>
   );
