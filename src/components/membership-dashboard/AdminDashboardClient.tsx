@@ -12,7 +12,7 @@ import type {
   AdminSelectedMember,
 } from "@/lib/membership-dashboard-admin";
 import type { HandbookRenderResult } from "@/lib/handbook";
-import { canAccessBenefit } from "@/lib/membership-dashboard-admin";
+import { hasBenefitAccess } from "@/lib/benefit-access";
 import { saveRedeemedBenefitsAction } from "@/lib/membership-dashboard-actions";
 
 type TabKey = "members" | "benefits" | "handbook";
@@ -405,7 +405,7 @@ export default function AdminDashboardClient(props: {
 
                 <ul className="list-plain" style={{ marginTop: ".75rem" }}>
                   {BENEFITS.map((b) => {
-                    const included = canAccessBenefit(
+                    const included = hasBenefitAccess(
                       selectedMember?.membershipTierRank ?? null,
                       b.tierMin,
                     );

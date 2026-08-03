@@ -1,7 +1,8 @@
 // src/lib/membership-dashboard-admin.ts
 import { prisma } from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
-import { BENEFITS, MEMBERSHIP_TIER_RANK, type BenefitId, type MembershipTierKey } from "@/content/benefits";
+import { BENEFITS, type BenefitId } from "@/content/benefits";
+import { hasBenefitAccess } from "@/lib/benefit-access";
 
 export type AdminMemberListItem = {
   userId: string;
@@ -190,12 +191,6 @@ export async function getAdminBenefitAuditTrail(
   });
 }
 
-// Helper for eligibility in UI (based on selected member rank)
-export function canAccessBenefit(memberRank: number | null, tierMin: MembershipTierKey) {
-  if (memberRank == null) return false;
-  return memberRank >= MEMBERSHIP_TIER_RANK[tierMin];
-}
-
 export type AdminBenefitRedemptionStat = {
   benefitId: BenefitId;
   eligible: number;
@@ -234,8 +229,9 @@ export async function getAdminBenefitRedemptionStats(): Promise<AdminBenefitRede
   }));
 
   return BENEFITS.map((b) => {
-    const minRank = MEMBERSHIP_TIER_RANK[b.tierMin];
-    const eligibleMembers = members.filter((m) => m.tierRank >= minRank);
+    const eligibleMembers = members.filter((m) =>
+      hasBenefitAccess(m.tierRank, b.tierMin),
+    );
     const eligible = eligibleMembers.length;
     const redeemed = eligibleMembers.filter((m) => m.redeemed.has(b.id)).length;
     const percent = eligible === 0 ? null : Math.round((redeemed / eligible) * 100);
