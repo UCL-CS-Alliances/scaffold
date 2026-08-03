@@ -55,8 +55,20 @@ export default function UserProfileForm(props: {
   appsMeta?: AppsMeta; // apps list for everyone
   initialSelf?: { id: string; email: string; firstName: string; lastName: string };
   initialTempPassword?: string;
+  // Admin deleted someone else: the owner of the selection re-points it and
+  // refreshes the server data, since this form cannot do either itself.
+  onUserDeleted?: () => void;
 }) {
-  const { mode, meId, targetUserId, meta, appsMeta, initialSelf, initialTempPassword } = props;
+  const {
+    mode,
+    meId,
+    targetUserId,
+    meta,
+    appsMeta,
+    initialSelf,
+    initialTempPassword,
+    onUserDeleted,
+  } = props;
 
   const isAdmin = mode === "admin-edit";
   const editingSelf = targetUserId === meId;
@@ -394,7 +406,14 @@ export default function UserProfileForm(props: {
       }
 
       setDeleteOpen(false);
-      setMessage("User deleted.");
+
+      // The parent clears the stale selection and refreshes, which remounts this
+      // form and wipes local state — so it owns the confirmation message too.
+      if (onUserDeleted) {
+        onUserDeleted();
+      } else {
+        setMessage("User deleted.");
+      }
     } catch {
       setMessage("Could not delete account.");
     } finally {

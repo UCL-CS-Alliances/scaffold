@@ -70,7 +70,12 @@ export async function POST(req: Request) {
         });
       }
 
-      // Delete dependents first (prevents FK constraint failures)
+      // Delete dependents first. userRole and membership are ON DELETE RESTRICT,
+      // so the user delete fails without this. The membership-dashboard
+      // projection is ON DELETE SET NULL, so the opposite problem: left alone it
+      // survives the member as an orphaned row still holding their
+      // redeemedBenefitCodes and its @unique memberKey.
+      await tx.membershipDashboardMember.deleteMany({ where: { userId: targetUserId } });
       await tx.userRole.deleteMany({ where: { userId: targetUserId } });
       await tx.membership.deleteMany({ where: { userId: targetUserId } });
 
@@ -80,6 +85,15 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true }, { status: 200 });
   } catch (e: any) {
+    // The target is already gone — most often a confirm dialogue submitted
+    // twice. Prisma's raw P2025 text is not something to show an admin.
+    if (e?.code === "P2025") {
+      return NextResponse.json(
+        { ok: false, error: "This user no longer exists." },
+        { status: 400 },
+      );
+    }
+
     // Prisma constraint errors often surface here; return a helpful message.
     const msg =
       typeof e?.message === "string" && e.message
