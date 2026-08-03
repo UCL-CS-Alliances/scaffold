@@ -1,5 +1,6 @@
 // src/lib/admin-helpers.ts
 import { OrganisationType } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import prisma from "@/lib/prisma";
 
 export function slugify(input: string) {
@@ -12,13 +13,19 @@ export function slugify(input: string) {
     .slice(0, 64);
 }
 
-export async function uniqueOrganisationSlug(base: string) {
+// Callers inside an interactive transaction must pass their tx: on the pooled
+// production connection (connection_limit=1) a query issued on the global client
+// queues behind the open transaction and deadlocks it. See issue #26.
+export async function uniqueOrganisationSlug(
+  base: string,
+  client: PrismaClient | Prisma.TransactionClient = prisma,
+) {
   const root = slugify(base) || "org";
   let candidate = root;
   let i = 2;
 
   while (true) {
-    const exists = await prisma.organisation.findUnique({
+    const exists = await client.organisation.findUnique({
       where: { slug: candidate },
       select: { id: true },
     });
