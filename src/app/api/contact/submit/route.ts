@@ -192,6 +192,8 @@ export async function POST(req: Request) {
   const cc = [email,enquiriesTrelloBoardEmail];
 
   try {
+    console.log("Mailgun sending email:", process.env.MAILGUN_SENDING_EMAIL);
+    console.log("Type:", typeof process.env.MAILGUN_SENDING_EMAIL);
     const result = await sendMailgun({
       from,
       to,
