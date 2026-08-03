@@ -1,6 +1,5 @@
 // src/lib/membership-dashboard-admin.ts
 import { prisma } from "@/lib/prisma";
-import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { BENEFITS, type BenefitId } from "@/content/benefits";
 import { hasBenefitAccess } from "@/lib/benefit-access";
 
@@ -32,13 +31,6 @@ export type AdminSelectedMember = {
 
   redeemedBenefitCodes: BenefitId[];
 };
-
-function requireAdmin(roleKeys: unknown): asserts roleKeys is string[] {
-  const keys = Array.isArray(roleKeys) ? roleKeys : [];
-  if (!keys.includes("ADMIN")) {
-    throw new Error("Admin access required.");
-  }
-}
 
 // Sign-ins are moments rather than dates, so the label carries a time — same
 // en-GB style as the admin client's formatDateTimeGB.
