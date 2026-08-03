@@ -211,7 +211,7 @@ export async function POST(req: Request) {
             throw new Error("Organisation type is invalid.");
           }
 
-          const slug = await uniqueOrganisationSlug(name);
+          const slug = await uniqueOrganisationSlug(name, tx);
           const created = await tx.organisation.create({
             data: { name, slug, type },
             select: { id: true },
