@@ -16,13 +16,21 @@ type Meta = {
 
 type AppsMeta = { apps: { id: number; key: string; name: string }[] };
 
+type AdminUser = {
+  id: string;
+  name: string;
+  label: string;
+  organisationId: number | null;
+  organisationName: string | null;
+};
+
 export default function AccountPageClient(props: {
   me: Me;
   isAdmin: boolean;
   initialSelectedUserId: string;
   initialTempPassword: string | null;
   appsMeta: AppsMeta;
-  adminData: null | { users: { id: string; label: string }[]; meta: Meta };
+  adminData: null | { users: AdminUser[]; meta: Meta };
 }) {
   const { me, isAdmin, adminData, initialSelectedUserId, initialTempPassword, appsMeta } = props;
 
@@ -36,6 +44,41 @@ export default function AccountPageClient(props: {
     if (!adminData) return null;
     return adminData.users.find((u) => u.id === selectedUserId)?.label ?? null;
   }, [adminData, selectedUserId]);
+
+  // Colleagues at one organisation belong together in the picker. Grouping keys
+  // on organisationId and never on the name: Organisation.name has no unique
+  // constraint and the admin "Add organisation" modal can create duplicates, so
+  // grouping by name would silently merge two distinct legal entities.
+  const userGroups = useMemo(() => {
+    if (!adminData) return [];
+
+    const byOrg = new Map<number, { label: string; users: AdminUser[] }>();
+    const unassigned: AdminUser[] = [];
+
+    for (const u of adminData.users) {
+      if (u.organisationId == null) {
+        unassigned.push(u);
+        continue;
+      }
+      const group = byOrg.get(u.organisationId);
+      if (group) group.users.push(u);
+      else
+        byOrg.set(u.organisationId, {
+          label: u.organisationName ?? "Unnamed organisation",
+          users: [u],
+        });
+    }
+
+    const groups = [...byOrg.entries()]
+      .map(([organisationId, group]) => ({ key: String(organisationId), ...group }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+
+    if (unassigned.length) {
+      groups.push({ key: "none", label: "No organisation", users: unassigned });
+    }
+
+    return groups;
+  }, [adminData]);
 
   return (
     <>
@@ -73,10 +116,14 @@ export default function AccountPageClient(props: {
               }}
               style={{ width: "min(28rem, 100%)" }}
             >
-              {adminData.users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.label}
-                </option>
+              {userGroups.map((group) => (
+                <optgroup key={group.key} label={group.label}>
+                  {group.users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </div>

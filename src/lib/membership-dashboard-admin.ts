@@ -5,6 +5,8 @@ import { hasBenefitAccess } from "@/lib/benefit-access";
 
 export type AdminMemberListItem = {
   userId: string;
+  // Grouping keys on the id, not the name: Organisation.name is not unique.
+  organisationId: number;
   organisationName: string;
   contactName: string;
   tierLabel: string;
@@ -82,6 +84,7 @@ export async function getAdminMemberList(): Promise<AdminMemberListItem[]> {
 
   return memberships.map((m) => ({
     userId: m.userId,
+    organisationId: m.organisationId,
     organisationName: m.organisation.name,
     contactName: `${m.user.firstName} ${m.user.lastName}`,
     tierLabel: m.membershipTier.label,

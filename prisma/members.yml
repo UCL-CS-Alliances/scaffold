@@ -27,6 +27,14 @@
     tier: silver
     status: active
     expiry: 2026-01-28
+  # Second contact at the same organisation. Deliberately on the same tier:
+  # once membership is organisation-scoped the schema cannot represent two
+  # contacts disagreeing, so a fixture that encoded that would be a lie.
+  additional_users:
+    - email: research@microsoft.example.com
+      password: msft-research-demo
+      first: Nia
+      last: Okafor
   redeemed_benefits: [B07, B11, B12]
 
 - id: google

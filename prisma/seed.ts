@@ -29,6 +29,15 @@ type RawMember = {
     expiry?: string | Date;
     manager?: string;
   };
+  // Further contacts at the same organisation, beyond the main one in
+  // `company`. They share the organisation's tier — membership is a property of
+  // the organisation, not of the individual.
+  additional_users?: {
+    email: string;
+    password: string;
+    first: string;
+    last: string;
+  }[];
   redeemed_benefits?: string[];
 };
 
@@ -128,6 +137,29 @@ async function assignRole(userId: string, roleId: number) {
     },
     update: {},
   });
+}
+
+// Membership has no unique constraint, so repeat-safety needs a findFirst
+// rather than an upsert. Every contact at an organisation gets the same tier
+// and dates — membership belongs to the organisation, not the individual.
+async function upsertMembershipForUser(args: {
+  userId: string;
+  organisationId: number;
+  membershipTierId: number;
+  isActive: boolean;
+  status: string;
+  managerName: string | null;
+  expiry: Date | null;
+}) {
+  const { userId, organisationId, ...rest } = args;
+
+  const existing = await prisma.membership.findFirst({
+    where: { userId, organisationId },
+  });
+
+  return existing
+    ? prisma.membership.update({ where: { id: existing.id }, data: rest })
+    : prisma.membership.create({ data: { userId, organisationId, ...rest } });
 }
 
 //
@@ -416,37 +448,57 @@ async function main() {
     }
     const isActive = m.membership.status === 'active';
 
-    const existingMembership = await prisma.membership.findFirst({
-      where: {
-        userId: user.id,
-        organisationId: organisation.id,
-      },
+    const membershipFields = {
+      membershipTierId: tierId,
+      isActive,
+      status: m.membership.status,
+      managerName: m.membership.manager ?? null,
+      expiry,
+    };
+
+    const membership = await upsertMembershipForUser({
+      userId: user.id,
+      organisationId: organisation.id,
+      ...membershipFields,
     });
 
-    const membership = existingMembership
-      ? await prisma.membership.update({
-          where: { id: existingMembership.id },
-          data: {
-            membershipTierId: tierId,
-            isActive,
-            status: m.membership.status,
-            managerName: m.membership.manager ?? null,
-            expiry,
-          },
-        })
-      : await prisma.membership.create({
-          data: {
-            userId: user.id,
-            organisationId: organisation.id,
-            membershipTierId: tierId,
-            isActive,
-            status: m.membership.status,
-            managerName: m.membership.manager ?? null,
-            expiry,
-          },
-        });
-
     console.log(`  Membership id=${membership.id}, tierId=${membership.membershipTierId}`);
+
+    // Additional contacts share the organisation's tier. Only the main contact
+    // carries the dashboard projection row — memberKey is unique per
+    // organisation, and redemption is the organisation's, not theirs.
+    for (const extra of m.additional_users ?? []) {
+      const extraPasswordHash = await hashPassword(extra.password);
+
+      const extraUser = await prisma.user.upsert({
+        where: { email: extra.email },
+        create: {
+          email: extra.email,
+          passwordHash: extraPasswordHash,
+          firstName: extra.first,
+          lastName: extra.last,
+          organisationId: organisation.id,
+          defaultAppId: apps.membershipDashboard.id,
+        },
+        update: {
+          firstName: extra.first,
+          lastName: extra.last,
+          organisationId: organisation.id,
+          passwordHash: extraPasswordHash,
+          defaultAppId: apps.membershipDashboard.id,
+        },
+      });
+
+      await assignRole(extraUser.id, memberRoleId);
+
+      await upsertMembershipForUser({
+        userId: extraUser.id,
+        organisationId: organisation.id,
+        ...membershipFields,
+      });
+
+      console.log(`  Additional contact id=${extraUser.id}, email=${extraUser.email}`);
+    }
 
     const dashboard = await prisma.membershipDashboardMember.upsert({
       where: { memberKey: m.id },
