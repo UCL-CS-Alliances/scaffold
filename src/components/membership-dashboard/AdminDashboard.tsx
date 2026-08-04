@@ -37,7 +37,7 @@ function gbp(n: number) {
 }
 
 export default function AdminDashboard({
-  totalMembers,
+  totalMemberOrganisations,
   title = "Membership Dashboard – Admin View",
   intro,
   totalUsers,
@@ -63,9 +63,9 @@ export default function AdminDashboard({
           <h2 style={{ marginTop: 0 }}>Overview</h2>
 
           <p>
-            The platform has <strong>{totalUsers}</strong> registered users, of
-            which <strong>{totalMembers}</strong> are members of the Friends of
-            UCL Computer Science programme. Paying members bring in{" "}
+            The platform has <strong>{totalUsers}</strong> registered users.{" "}
+            <strong>{totalMemberOrganisations}</strong> organisations are members
+            of the Friends of UCL Computer Science programme, bringing in{" "}
             <strong>{gbp(payingRevenue)}</strong> revenue. The most utilised
             benefit is <strong>{mostUtilisedBenefitLabel}</strong>.
           </p>

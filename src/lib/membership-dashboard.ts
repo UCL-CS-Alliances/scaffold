@@ -14,7 +14,9 @@ export type AdminTierSummary = {
 };
 
 export type AdminDashboardSummary = {
-  totalMembers: number;
+  // Member *organisations*, not contacts: a partner with three people on the
+  // platform is one member of the programme.
+  totalMemberOrganisations: number;
   tiers: AdminTierSummary[];
 };
 
@@ -38,39 +40,61 @@ export async function getAdminDashboardSummary(): Promise<AdminDashboardSummary>
     where: { key: "MEMBER" },
   });
 
-  const tiers = await prisma.membershipTier.findMany({
-    orderBy: { rank: "asc" },
-    include: {
-      memberships: {
-        where: {
-          isActive: true,
-          user: memberRole
-            ? {
-                roles: {
-                  some: { roleId: memberRole.id },
-                },
-              }
-            : undefined,
-        },
+  const [tiers, memberships] = await Promise.all([
+    prisma.membershipTier.findMany({
+      orderBy: { rank: "asc" },
+      select: { id: true, key: true, label: true, rank: true },
+    }),
+    prisma.membership.findMany({
+      where: {
+        isActive: true,
+        user: memberRole
+          ? {
+              roles: {
+                some: { roleId: memberRole.id },
+              },
+            }
+          : undefined,
       },
-    },
-  });
+      select: {
+        organisationId: true,
+        membershipTierId: true,
+        membershipTier: { select: { rank: true } },
+      },
+    }),
+  ]);
+
+  // Counting organisations rather than membership rows. Until Membership is
+  // re-keyed one organisation can hold a row per contact, so counting rows
+  // would bill a two-contact partner twice. Highest rank wins per organisation
+  // — the same rule getMembershipForOrganisation applies, so these totals agree
+  // with the tier each member actually sees.
+  const tierByOrganisation = new Map<number, { tierId: number; rank: number }>();
+  for (const m of memberships) {
+    const current = tierByOrganisation.get(m.organisationId);
+    if (!current || m.membershipTier.rank > current.rank) {
+      tierByOrganisation.set(m.organisationId, {
+        tierId: m.membershipTierId,
+        rank: m.membershipTier.rank,
+      });
+    }
+  }
+
+  const countByTierId = new Map<number, number>();
+  for (const { tierId } of tierByOrganisation.values()) {
+    countByTierId.set(tierId, (countByTierId.get(tierId) ?? 0) + 1);
+  }
 
   const tierSummaries: AdminTierSummary[] = tiers.map((tier) => ({
     id: tier.id,
     key: tier.key,
     label: tier.label,
     rank: tier.rank,
-    count: tier.memberships.length,
+    count: countByTierId.get(tier.id) ?? 0,
   }));
 
-  const totalMembers = tierSummaries.reduce(
-    (sum, t) => sum + t.count,
-    0,
-  );
-
   return {
-    totalMembers,
+    totalMemberOrganisations: tierByOrganisation.size,
     tiers: tierSummaries,
   };
 }

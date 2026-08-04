@@ -52,51 +52,92 @@ function formatLastSignInLabel(d: Date | null | undefined): string {
 export async function getAdminMemberList(): Promise<AdminMemberListItem[]> {
   const memberRole = await prisma.role.findUnique({ where: { key: "MEMBER" } });
 
-  const memberships = await prisma.membership.findMany({
+  // Driven by users rather than by membership rows: an organisation holds one
+  // membership but can have several contacts, and this list has a row per
+  // contact. Driving it off Membership would drop colleagues who share their
+  // organisation's membership rather than holding one of their own.
+  const users = await prisma.user.findMany({
     where: {
-      isActive: true,
-      user: memberRole
-        ? { roles: { some: { roleId: memberRole.id } } }
-        : undefined,
+      organisationId: { not: null },
+      ...(memberRole ? { roles: { some: { roleId: memberRole.id } } } : {}),
     },
-    include: {
-      membershipTier: true,
-      organisation: true,
-      user: true,
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      organisationId: true,
+      organisation: { select: { name: true } },
     },
     orderBy: [
-      { membershipTier: { rank: "desc" } }, // Platinum -> Bronze
       { organisation: { name: "asc" } },
+      { lastName: "asc" },
+      { firstName: "asc" },
     ],
   });
 
+  if (!users.length) return [];
+
+  const organisationIds = [
+    ...new Set(
+      users
+        .map((u) => u.organisationId)
+        .filter((id): id is number => id != null),
+    ),
+  ];
+
+  const memberships = await prisma.membership.findMany({
+    where: { organisationId: { in: organisationIds }, isActive: true },
+    include: { membershipTier: true },
+  });
+
+  // Highest rank wins per organisation, ties by lowest id — the same rule as
+  // getMembershipForOrganisation, so this list agrees with the member view.
+  const membershipByOrganisation = new Map<number, (typeof memberships)[number]>();
+  for (const m of memberships) {
+    const current = membershipByOrganisation.get(m.organisationId);
+    const wins =
+      !current ||
+      m.membershipTier.rank > current.membershipTier.rank ||
+      (m.membershipTier.rank === current.membershipTier.rank && m.id < current.id);
+    if (wins) membershipByOrganisation.set(m.organisationId, m);
+  }
+
   // One grouped query for all members' latest LOGIN rows — not one per member.
-  const userIds = memberships.map((m) => m.userId);
-  const latestLogins = userIds.length
-    ? await prisma.auditLog.groupBy({
-        by: ["entityId"],
-        where: {
-          entityType: "User",
-          entityId: { in: userIds },
-          action: "LOGIN",
-        },
-        _max: { timestamp: true },
-      })
-    : [];
+  const userIds = users.map((u) => u.id);
+  const latestLogins = await prisma.auditLog.groupBy({
+    by: ["entityId"],
+    where: {
+      entityType: "User",
+      entityId: { in: userIds },
+      action: "LOGIN",
+    },
+    _max: { timestamp: true },
+  });
   const lastSignInByUserId = new Map(
     latestLogins.map((g) => [g.entityId, g._max.timestamp]),
   );
 
-  return memberships.map((m) => ({
-    userId: m.userId,
-    organisationId: m.organisationId,
-    organisationName: m.organisation.name,
-    contactName: `${m.user.firstName} ${m.user.lastName}`,
-    tierLabel: m.membershipTier.label,
-    tierRank: m.membershipTier.rank,
-    tierKey: m.membershipTier.key,
-    lastSignedInLabel: formatLastSignInLabel(lastSignInByUserId.get(m.userId)),
-  }));
+  // Contacts whose organisation holds no active membership are dropped, which
+  // preserves the membership-driven semantics this list had before.
+  return users.flatMap((u) => {
+    if (u.organisationId == null) return [];
+
+    const membership = membershipByOrganisation.get(u.organisationId);
+    if (!membership) return [];
+
+    return [
+      {
+        userId: u.id,
+        organisationId: u.organisationId,
+        organisationName: u.organisation?.name ?? "Unknown organisation",
+        contactName: `${u.firstName} ${u.lastName}`,
+        tierLabel: membership.membershipTier.label,
+        tierRank: membership.membershipTier.rank,
+        tierKey: membership.membershipTier.key,
+        lastSignedInLabel: formatLastSignInLabel(lastSignInByUserId.get(u.id)),
+      },
+    ];
+  });
 }
 
 export async function getAdminSelectedMember(userId: string): Promise<AdminSelectedMember | null> {
@@ -202,8 +243,10 @@ export async function getAdminBenefitRedemptionStats(): Promise<AdminBenefitRede
   // Fetch the active MEMBER role id (consistent with your other admin summary logic)
   const memberRole = await prisma.role.findUnique({ where: { key: "MEMBER" } });
 
-  // Pull all active memberships for MEMBER users, including tier rank and redeemed codes
-  const rows = await prisma.membership.findMany({
+  // The unit here is the organisation, not the contact: eligibility and
+  // redemption both belong to the partner, so a company with three people is
+  // one eligible member and redeems a given benefit once.
+  const memberships = await prisma.membership.findMany({
     where: {
       isActive: true,
       user: memberRole
@@ -211,29 +254,61 @@ export async function getAdminBenefitRedemptionStats(): Promise<AdminBenefitRede
         : undefined,
     },
     select: {
-      userId: true,
+      organisationId: true,
       membershipTier: { select: { rank: true } },
-      user: {
-        select: {
-          membershipDashboardMember: { select: { redeemedBenefitCodes: true } },
-        },
-      },
     },
   });
 
-  // Normalise into a simple array per member (1 user per org for now)
-  const members = rows.map((r) => ({
-    userId: r.userId,
-    tierRank: r.membershipTier.rank,
-    redeemed: new Set((r.user.membershipDashboardMember?.redeemedBenefitCodes ?? []) as BenefitId[]),
-  }));
+  const rankByOrganisation = new Map<number, number>();
+  for (const m of memberships) {
+    const current = rankByOrganisation.get(m.organisationId);
+    if (current == null || m.membershipTier.rank > current) {
+      rankByOrganisation.set(m.organisationId, m.membershipTier.rank);
+    }
+  }
+
+  if (!rankByOrganisation.size) {
+    return BENEFITS.map((b) => ({
+      benefitId: b.id,
+      eligible: 0,
+      redeemed: 0,
+      percent: null,
+    }));
+  }
+
+  const projections = await prisma.membershipDashboardMember.findMany({
+    where: { user: { organisationId: { in: [...rankByOrganisation.keys()] } } },
+    select: {
+      redeemedBenefitCodes: true,
+      user: { select: { organisationId: true } },
+    },
+  });
+
+  // Union across an organisation's contacts, which is what the backfill
+  // migration will collapse into a single row per organisation.
+  const redeemedByOrganisation = new Map<number, Set<string>>();
+  for (const projection of projections) {
+    const organisationId = projection.user?.organisationId;
+    if (organisationId == null) continue;
+
+    const codes = redeemedByOrganisation.get(organisationId) ?? new Set<string>();
+    projection.redeemedBenefitCodes.forEach((code) => codes.add(code));
+    redeemedByOrganisation.set(organisationId, codes);
+  }
+
+  const organisations = [...rankByOrganisation.entries()].map(
+    ([organisationId, tierRank]) => ({
+      tierRank,
+      redeemed: redeemedByOrganisation.get(organisationId) ?? new Set<string>(),
+    }),
+  );
 
   return BENEFITS.map((b) => {
-    const eligibleMembers = members.filter((m) =>
-      hasBenefitAccess(m.tierRank, b.tierMin),
+    const eligibleOrganisations = organisations.filter((o) =>
+      hasBenefitAccess(o.tierRank, b.tierMin),
     );
-    const eligible = eligibleMembers.length;
-    const redeemed = eligibleMembers.filter((m) => m.redeemed.has(b.id)).length;
+    const eligible = eligibleOrganisations.length;
+    const redeemed = eligibleOrganisations.filter((o) => o.redeemed.has(b.id)).length;
     const percent = eligible === 0 ? null : Math.round((redeemed / eligible) * 100);
 
     return { benefitId: b.id, eligible, redeemed, percent };
