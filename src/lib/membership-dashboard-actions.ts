@@ -4,6 +4,7 @@
 import { prisma } from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { recordAuditLog } from "@/lib/audit-log";
+import { getMembershipForOrganisation } from "@/lib/membership";
 import { BENEFITS, type BenefitId } from "@/content/benefits";
 
 function requireAdmin(roleKeys: unknown) {
@@ -34,16 +35,29 @@ export async function saveRedeemedBenefitsAction(input: {
 
   const user = await prisma.user.findUnique({
     where: { id: input.userId },
-    include: {
-      organisation: true,
-      memberships: { where: { isActive: true } },
-      membershipDashboardMember: true,
-    },
+    include: { organisation: true },
   });
 
   if (!user) throw new Error("User not found.");
 
-  const existing = user.membershipDashboardMember;
+  // Redemption is the organisation's, so the projection row is looked up by
+  // organisation rather than by contact. Looking it up per user would miss the
+  // row a colleague already holds and take the create branch below — and
+  // memberKey is unique per organisation slug, so that would fail with P2002.
+  const existing = user.organisationId
+    ? await prisma.membershipDashboardMember.findFirst({
+        where: { user: { organisationId: user.organisationId } },
+        orderBy: { id: "asc" },
+      })
+    : await prisma.membershipDashboardMember.findUnique({
+        where: { userId: user.id },
+      });
+
+  // Resolved before the transaction opens: on the pooled production connection
+  // a query on the global client inside an open transaction deadlocks it.
+  const membership = user.organisationId
+    ? await getMembershipForOrganisation(prisma, user.organisationId)
+    : null;
 
   // Diff against the stored set: the action replaces the whole array, so the
   // audit record needs added/removed computed here rather than just the new
@@ -73,6 +87,12 @@ export async function saveRedeemedBenefitsAction(input: {
           entityType: "MembershipDashboardMember",
           // Target User.id, not the projection row id, so member-history
           // queries hit the (entityType, entityId) index.
+          //
+          // The redemption state is now the organisation's but the trail is
+          // still keyed per contact, so a save made by one colleague does not
+          // appear in the other's history. Re-keying it to the organisation is
+          // deferred to the migration that moves the projection itself, which
+          // can rewrite the historical rows at the same time.
           entityId: user.id,
           action: "UPDATE",
           actorId,
@@ -90,13 +110,12 @@ export async function saveRedeemedBenefitsAction(input: {
       return;
     }
 
-    const activeMembership = user.memberships.at(0) ?? null;
     const memberKey = user.organisation?.slug ?? `user-${user.id.slice(0, 12)}`;
 
     await tx.membershipDashboardMember.create({
       data: {
         userId: user.id,
-        membershipId: activeMembership?.id ?? null,
+        membershipId: membership?.membershipId ?? null,
         memberKey,
         redeemedBenefitCodes: input.redeemedBenefitCodes,
       },

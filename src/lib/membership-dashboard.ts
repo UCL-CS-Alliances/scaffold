@@ -1,5 +1,9 @@
 // src/lib/membership-dashboard.ts
 import { prisma } from "@/lib/prisma";
+import {
+  getMembershipForOrganisation,
+  getRedeemedBenefitCodesForOrganisation,
+} from "@/lib/membership";
 
 export type AdminTierSummary = {
   id: number;
@@ -76,37 +80,32 @@ export async function getMemberDashboardData(
 ): Promise<MemberDashboardData | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: {
-      organisation: true,
-      memberships: {
-        where: { isActive: true },
-        include: { membershipTier: true },
-      },
-      membershipDashboardMember: true,
+    select: {
+      firstName: true,
+      organisationId: true,
+      organisation: { select: { name: true } },
     },
   });
 
   if (!user) return null;
 
-  const membership = user.memberships.at(0) ?? null;
-
-  const tierLabel = membership?.membershipTier.label ?? "Unknown tier";
-  const tierKey = membership?.membershipTier.key ?? null;
-  const tierRank = membership?.membershipTier.rank ?? null;
-  const expiry = membership?.expiry ?? null;
-  const managerName = membership?.managerName ?? null;
-
-  const redeemedBenefitCodes =
-    user.membershipDashboardMember?.redeemedBenefitCodes ?? [];
+  // Tier and redemption both belong to the organisation, so every contact at
+  // one partner sees the same dashboard.
+  const [membership, redeemedBenefitCodes] = user.organisationId
+    ? await Promise.all([
+        getMembershipForOrganisation(prisma, user.organisationId),
+        getRedeemedBenefitCodesForOrganisation(prisma, user.organisationId),
+      ])
+    : [null, [] as string[]];
 
   return {
     firstName: user.firstName,
     organisationName: user.organisation?.name ?? null,
-    membershipTierLabel: tierLabel,
-    membershipTierKey: tierKey,
-    membershipTierRank: tierRank,
-    membershipExpiry: expiry,
-    membershipManagerName: managerName,
+    membershipTierLabel: membership?.tierLabel ?? "Unknown tier",
+    membershipTierKey: membership?.tierKey ?? null,
+    membershipTierRank: membership?.tierRank ?? null,
+    membershipExpiry: membership?.expiry ?? null,
+    membershipManagerName: membership?.managerName ?? null,
     redeemedBenefitCodes,
   };
 }

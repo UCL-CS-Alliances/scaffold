@@ -2,6 +2,10 @@
 import { prisma } from "@/lib/prisma";
 import { BENEFITS, type BenefitId } from "@/content/benefits";
 import { hasBenefitAccess } from "@/lib/benefit-access";
+import {
+  getMembershipForOrganisation,
+  getRedeemedBenefitCodesForOrganisation,
+} from "@/lib/membership";
 
 export type AdminMemberListItem = {
   userId: string;
@@ -18,6 +22,7 @@ export type AdminMemberListItem = {
 
 export type AdminSelectedMember = {
   userId: string;
+  organisationId: number | null;
   organisationName: string | null;
   contactName: string;
   membershipTierLabel: string;
@@ -101,33 +106,33 @@ export async function getAdminSelectedMember(userId: string): Promise<AdminSelec
       organisation: true,
       defaultApp: true,
       roles: { include: { role: true } },
-      memberships: {
-        where: { isActive: true },
-        include: { membershipTier: true, organisation: true },
-      },
-      membershipDashboardMember: true,
     },
   });
 
   if (!user) return null;
 
-  const membership = user.memberships.at(0) ?? null;
-  const tierLabel = membership?.membershipTier.label ?? "Unknown tier";
-  const tierKey = membership?.membershipTier.key ?? null;
-  const tierRank = membership?.membershipTier.rank ?? null;
+  // Tier and redemption are the organisation's, so both contacts at a partner
+  // show identical membership details and benefit state.
+  const [membership, redeemedCodes] = user.organisationId
+    ? await Promise.all([
+        getMembershipForOrganisation(prisma, user.organisationId),
+        getRedeemedBenefitCodesForOrganisation(prisma, user.organisationId),
+      ])
+    : [null, [] as string[]];
 
-  const redeemed = (user.membershipDashboardMember?.redeemedBenefitCodes ?? []) as BenefitId[];
+  const redeemed = redeemedCodes as BenefitId[];
 
   return {
     userId: user.id,
-    organisationName: user.organisation?.name ?? membership?.organisation.name ?? null,
+    organisationName: user.organisation?.name ?? membership?.organisationName ?? null,
     contactName: `${user.firstName} ${user.lastName}`,
-    membershipTierLabel: tierLabel,
-    membershipTierKey: tierKey,
-    membershipTierRank: tierRank,
+    membershipTierLabel: membership?.tierLabel ?? "Unknown tier",
+    membershipTierKey: membership?.tierKey ?? null,
+    membershipTierRank: membership?.tierRank ?? null,
     membershipExpiry: membership?.expiry ?? null,
     membershipManagerName: membership?.managerName ?? null,
     membershipStatus: membership?.status ?? null,
+    organisationId: user.organisationId,
 
     roleKeys: user.roles.map((ur) => ur.role.key),
     defaultAppKey: user.defaultApp?.key ?? null,

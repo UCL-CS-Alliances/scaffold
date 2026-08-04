@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
+import { getMembershipForOrganisation } from "@/lib/membership";
 
 export const dynamic = "force-dynamic";
 
@@ -30,14 +31,6 @@ export async function GET(req: Request) {
       defaultAppId: true,
       organisation: { select: { name: true } },
       roles: { select: { role: { select: { key: true, label: true } } } },
-      memberships: {
-        where: { isActive: true },
-        take: 1,
-        include: {
-          organisation: { select: { name: true } },
-          membershipTier: { select: { id: true, label: true } },
-        },
-      },
     },
   });
 
@@ -45,28 +38,32 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: "User not found." }, { status: 404 });
   }
 
-  const activeMembership = user.memberships[0] ?? null;
+  // The membership being edited is the organisation's, so editing either
+  // contact at a partner shows — and saves against — the same tier and dates.
+  const membership = user.organisationId
+    ? await getMembershipForOrganisation(prisma, user.organisationId)
+    : null;
+
+  const expiryText = membership?.expiry
+    ? new Intl.DateTimeFormat("en-GB").format(membership.expiry)
+    : null;
 
   const membershipSummary = {
-    organisationName: activeMembership?.organisation?.name ?? user.organisation?.name ?? null,
-    tierLabel: activeMembership?.membershipTier?.label ?? null,
-    status: activeMembership?.status ?? null,
-    expiryText: activeMembership?.expiry
-      ? new Intl.DateTimeFormat("en-GB").format(activeMembership.expiry)
-      : null,
-    managerName: activeMembership?.managerName ?? null,
-    isActive: activeMembership?.isActive ?? null,
+    organisationName: membership?.organisationName ?? user.organisation?.name ?? null,
+    tierLabel: membership?.tierLabel ?? null,
+    status: membership?.status ?? null,
+    expiryText,
+    managerName: membership?.managerName ?? null,
+    isActive: membership?.isActive ?? null,
   };
 
-  const membershipEdit = activeMembership
+  const membershipEdit = membership
     ? {
-        membershipTierId: activeMembership.membershipTierId,
-        status: activeMembership.status,
-        managerName: activeMembership.managerName,
-        expiryText: activeMembership.expiry
-          ? new Intl.DateTimeFormat("en-GB").format(activeMembership.expiry)
-          : "",
-        isActive: activeMembership.isActive,
+        membershipTierId: membership.membershipTierId,
+        status: membership.status,
+        managerName: membership.managerName,
+        expiryText: expiryText ?? "",
+        isActive: membership.isActive,
       }
     : null;
 

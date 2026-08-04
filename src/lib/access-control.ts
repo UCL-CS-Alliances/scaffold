@@ -1,5 +1,6 @@
 // src/lib/access-control.ts
 import { prisma } from "@/lib/prisma";
+import { getMembershipForUser } from "@/lib/membership";
 
 /**
  * Role-first + tier fallback app access:
@@ -13,10 +14,6 @@ export async function userCanAccessApp(userId: string, appKey: string) {
       where: { id: userId },
       include: {
         roles: { include: { role: true } },
-        memberships: {
-          where: { isActive: true },
-          include: { membershipTier: true },
-        },
       },
     }),
     prisma.app.findUnique({
@@ -40,16 +37,13 @@ export async function userCanAccessApp(userId: string, appKey: string) {
     return true;
   }
 
-  // 2) Membership-tier-based fallback (unchanged from your current policy)
-  const activeMemberships = user.memberships.filter((m) => m.isActive);
-  if (!activeMemberships.length) return false;
+  // 2) Membership-tier fallback. The tier is the user's organisation's, so a
+  // contact with no organisation — or whose organisation holds no active
+  // membership — resolves to null and is denied, as before.
+  const membership = await getMembershipForUser(prisma, userId);
+  if (!membership) return false;
 
-  const highest = activeMemberships.reduce((best, current) => {
-    if (!best) return current;
-    return current.membershipTier.rank > best.membershipTier.rank ? current : best;
-  }, activeMemberships[0]);
-
-  const userRank = highest.membershipTier.rank;
+  const userRank = membership.tierRank;
   const rules = app.appAccessRules;
 
   // No rules → default deny
