@@ -36,15 +36,13 @@ model User {
   defaultApp   App? @relation("UserDefaultApp", fields: [defaultAppId], references: [id])
   defaultAppId Int?
 
-  roles       UserRole[]
-  memberships Membership[]
+  roles UserRole[]
+
+  // No memberships relation: a user's membership is their organisation's.
 
   // Auth models
   accounts Account[]
   sessions Session[]
-
-  // App-specific projections (1–1)
-  membershipDashboardMember MembershipDashboardMember? @relation("UserDashboardMember")
 
   // Audit log relation (actor)
   auditLogs AuditLog[] @relation("AuditActor")
@@ -105,9 +103,7 @@ model MembershipTier {
 }
 
 model Membership {
-  id     Int    @id @default(autoincrement())
-  user   User   @relation(fields: [userId], references: [id])
-  userId String
+  id Int @id @default(autoincrement())
 
   organisation   Organisation @relation(fields: [organisationId], references: [id])
   organisationId Int          @unique
@@ -122,11 +118,7 @@ model Membership {
   managerName String?
   expiry      DateTime?
 
-  // 1–1 relation to dashboard projection
-  dashboardEntry MembershipDashboardMember? @relation("MembershipDashboardEntry")
-
   // No @@index([organisationId]) — the unique index above already covers it.
-  @@index([userId])
   @@index([membershipTierId])
 }
 
@@ -173,26 +165,17 @@ enum AppAccessType {
 model MembershipDashboardMember {
   id Int @id @default(autoincrement())
 
-  // Link back to canonical data (optional, but at most one each)
-  user   User?   @relation("UserDashboardMember", fields: [userId], references: [id])
-  userId String? @unique
-
-  membership   Membership? @relation("MembershipDashboardEntry", fields: [membershipId], references: [id])
-  membershipId Int?        @unique
-
-  // The organisation owns the redemption state. userId and membershipId are
-  // kept for now so this migration drops nothing and un-rebased deployments
-  // keep working; they are removed once every write path is org-keyed.
+  // The organisation owns the redemption state. There is deliberately no link
+  // to a user or to Membership: organisationId already determines the
+  // membership 1–1, so a membershipId could only drift out of step with it.
   organisation   Organisation @relation(fields: [organisationId], references: [id])
   organisationId Int          @unique
 
-  // YAML id for easy mapping
+  // YAML id for easy mapping; equal to Organisation.slug
   memberKey String @unique // e.g. "chanel", "microsoft"
 
   // App-specific fields only
   redeemedBenefitCodes String[] // ["B03", "B08", ...]
-
-  @@index([membershipId])
 }
 
 // AUTH MODELS (NextAuth-style)

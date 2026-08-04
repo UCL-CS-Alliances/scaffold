@@ -58,15 +58,25 @@ async function getUserAuditSnapshot(
       defaultAppId: true,
       organisationId: true,
       roles: { select: { role: { select: { key: true } } } },
-      memberships: {
-        where: { isActive: true },
+      // The organisation's membership, not the contact's. Reading it per
+      // contact recorded "no membership change" for anyone who did not
+      // personally hold the row — i.e. every second contact at a partner.
+      //
+      // Unfiltered by isActive on purpose: the snapshot captures isActive
+      // itself, so suspending now shows as a field change rather than as the
+      // membership disappearing.
+      organisation: {
         select: {
-          membershipTierId: true,
-          organisationId: true,
-          isActive: true,
-          status: true,
-          managerName: true,
-          expiry: true,
+          membership: {
+            select: {
+              membershipTierId: true,
+              organisationId: true,
+              isActive: true,
+              status: true,
+              managerName: true,
+              expiry: true,
+            },
+          },
         },
       },
     },
@@ -74,7 +84,7 @@ async function getUserAuditSnapshot(
 
   if (!user) return null;
 
-  const membership = user.memberships.at(0) ?? null;
+  const membership = user.organisation?.membership ?? null;
 
   return {
     firstName: user.firstName,
@@ -386,40 +396,32 @@ export async function POST(req: Request) {
           throw new Error("To assign a membership tier, the user must have an organisation set.");
         }
 
-        const existingMembership = await tx.membership.findFirst({
-          where: { userId: targetUserId, isActive: true },
-          select: { id: true },
+        const membershipFields = {
+          membershipTierId: resolvedMembershipTierId,
+          isActive: Boolean(admin.membership.isActive),
+          status: String(admin.membership.status ?? "active"),
+          managerName: admin.membership.managerName
+            ? String(admin.membership.managerName)
+            : null,
+          expiry,
+        };
+
+        // Keyed on the organisation, so editing any contact edits the one
+        // membership their organisation holds.
+        //
+        // This previously looked the row up per contact and fell through to a
+        // create when it found none, which broke in two ways: saving a second
+        // contact's profile violated the unique organisationId, and
+        // reactivating a suspended member (whose own row the isActive filter
+        // hid) silently created a duplicate.
+        await tx.membership.upsert({
+          where: { organisationId: targetUser.organisationId },
+          create: {
+            organisationId: targetUser.organisationId,
+            ...membershipFields,
+          },
+          update: membershipFields,
         });
-
-        const status = String(admin.membership.status ?? "active");
-        const managerName = admin.membership.managerName ? String(admin.membership.managerName) : null;
-        const isActive = Boolean(admin.membership.isActive);
-
-        if (existingMembership) {
-          await tx.membership.update({
-            where: { id: existingMembership.id },
-            data: {
-              organisationId: targetUser.organisationId,
-              membershipTierId: resolvedMembershipTierId,
-              isActive,
-              status,
-              managerName,
-              expiry,
-            },
-          });
-        } else {
-          await tx.membership.create({
-            data: {
-              userId: targetUserId,
-              organisationId: targetUser.organisationId,
-              membershipTierId: resolvedMembershipTierId,
-              isActive,
-              status,
-              managerName,
-              expiry,
-            },
-          });
-        }
       }
 
       // 6) Audit record: one row per save, skipped when nothing changed.

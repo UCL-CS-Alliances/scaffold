@@ -62,6 +62,16 @@ Migrations in `prisma/migrations/` are the schema authority.
 3. Test against a disposable local database, update the seed if needed, and commit the schema **plus** the new migration directory.
 4. Mark the PR **Database migration required** and tell the deployment owner.
 
+**When a migration needs to move data, not just change shape**, generate it without applying it and hand-edit the result:
+
+1. `npx prisma migrate dev --create-only --name <descriptive-name>` — writes the SQL, applies nothing.
+2. Interleave your `UPDATE`/`DELETE` statements among the generated DDL. Let Prisma generate all DDL and copy its constraint names; only the data statements are yours. Order matters — backfill before adding `NOT NULL` or a unique index, so the constraint is only checked once the data can satisfy it.
+3. `npx prisma migrate dev` to apply locally and regenerate the client.
+
+Prisma runs each migration file in one transaction and PostgreSQL has transactional DDL, so a failed backfill rolls the whole file back. Point `DATABASE_URL` at a scratch database first: `--create-only` still provisions a shadow database on whatever it points at, which must never be the shared Supabase project.
+
+> **Known drift: `User_primary_contact_per_organisation_key`.** Prisma cannot express a partial unique index, so this one lives only in `20260804130100_add_primary_contact_unique_index` and is invisible to `schema.prisma`. Every `prisma migrate dev` from now on will emit a spurious `DROP INDEX "User_primary_contact_per_organisation_key";` into the migration it generates. **Delete that line before applying.** If the upkeep stops being worth it, drop the index and rely on the application-level enforcement in `update-user`.
+
 **Deployment owner (apply to the shared DB)**
 1. Point `.env.local`'s `DIRECT_URL` at the shared Supabase session connection.
 2. `npm run db:migrate:deploy`, then verify status/constraints.

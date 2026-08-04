@@ -98,17 +98,10 @@ export async function getAdminMemberList(): Promise<AdminMemberListItem[]> {
     include: { membershipTier: true },
   });
 
-  // Highest rank wins per organisation, ties by lowest id — the same rule as
-  // getMembershipForOrganisation, so this list agrees with the member view.
-  const membershipByOrganisation = new Map<number, (typeof memberships)[number]>();
-  for (const m of memberships) {
-    const current = membershipByOrganisation.get(m.organisationId);
-    const wins =
-      !current ||
-      m.membershipTier.rank > current.membershipTier.rank ||
-      (m.membershipTier.rank === current.membershipTier.rank && m.id < current.id);
-    if (wins) membershipByOrganisation.set(m.organisationId, m);
-  }
+  // One row per organisation, so this is a straight lookup.
+  const membershipByOrganisation = new Map(
+    memberships.map((m) => [m.organisationId, m]),
+  );
 
   // One grouped query for all members' latest LOGIN rows — not one per member.
   const userIds = users.map((u) => u.id);
@@ -215,10 +208,13 @@ function asStringArray(v: unknown): string[] {
 }
 
 export async function getAdminBenefitAuditTrail(
-  userId: string,
+  organisationId: number,
 ): Promise<AdminBenefitAuditEntry[]> {
   const rows = await prisma.auditLog.findMany({
-    where: { entityType: "MembershipDashboardMember", entityId: userId },
+    where: {
+      entityType: "OrganisationBenefitRedemption",
+      entityId: String(organisationId),
+    },
     orderBy: { timestamp: "desc" },
     take: 20,
     include: { actor: true },
@@ -258,11 +254,14 @@ export async function getAdminBenefitRedemptionStats(): Promise<AdminBenefitRede
   // The unit here is the organisation, not the contact: eligibility and
   // redemption both belong to the partner, so a company with three people is
   // one eligible member and redeems a given benefit once.
+  // Qualified by the organisation having at least one MEMBER contact — see the
+  // matching note in getAdminDashboardSummary. One row per organisation, so no
+  // deduplication is needed.
   const memberships = await prisma.membership.findMany({
     where: {
       isActive: true,
-      user: memberRole
-        ? { roles: { some: { roleId: memberRole.id } } }
+      organisation: memberRole
+        ? { users: { some: { roles: { some: { roleId: memberRole.id } } } } }
         : undefined,
     },
     select: {
@@ -271,13 +270,9 @@ export async function getAdminBenefitRedemptionStats(): Promise<AdminBenefitRede
     },
   });
 
-  const rankByOrganisation = new Map<number, number>();
-  for (const m of memberships) {
-    const current = rankByOrganisation.get(m.organisationId);
-    if (current == null || m.membershipTier.rank > current) {
-      rankByOrganisation.set(m.organisationId, m.membershipTier.rank);
-    }
-  }
+  const rankByOrganisation = new Map<number, number>(
+    memberships.map((m) => [m.organisationId, m.membershipTier.rank]),
+  );
 
   if (!rankByOrganisation.size) {
     return BENEFITS.map((b) => ({

@@ -51,12 +51,7 @@ export async function POST(req: Request) {
       // user's actorId is nulled by the FK's ON DELETE SET NULL.
       const target = await tx.user.findUnique({
         where: { id: targetUserId },
-        select: {
-          email: true,
-          firstName: true,
-          lastName: true,
-          organisationId: true,
-        },
+        select: { email: true, firstName: true, lastName: true },
       });
 
       if (target) {
@@ -75,40 +70,13 @@ export async function POST(req: Request) {
         });
       }
 
-      // The membership and the dashboard projection are the organisation's, but
-      // both still carry a userId until the contract migration drops it. There
-      // is now only one of each per organisation, so deleting them with the
-      // contact would destroy the whole organisation's tier and redemption
-      // history. Hand them to a remaining contact instead, and only delete when
-      // this was the last one.
+      // The organisation's membership and redemption history deliberately
+      // survive the contact: an organisation is a member independently of which
+      // of its people hold logins, and destroying its redemption record because
+      // someone left would be data loss. Neither table references the user any
+      // more, so there is nothing to reassign or clean up.
       //
-      // Interim: this whole block collapses to nothing once userId is gone.
-      const successor = target?.organisationId
-        ? await tx.user.findFirst({
-            where: { organisationId: target.organisationId, id: { not: targetUserId } },
-            select: { id: true },
-            orderBy: { id: "asc" },
-          })
-        : null;
-
-      if (successor) {
-        await tx.membership.updateMany({
-          where: { userId: targetUserId },
-          data: { userId: successor.id },
-        });
-        await tx.membershipDashboardMember.updateMany({
-          where: { userId: targetUserId },
-          data: { userId: successor.id },
-        });
-      } else {
-        // Last contact at the organisation. The projection is ON DELETE SET
-        // NULL, so left alone it survives as an orphan still holding its
-        // @unique memberKey; membership is ON DELETE RESTRICT and would block
-        // the user delete outright.
-        await tx.membershipDashboardMember.deleteMany({ where: { userId: targetUserId } });
-        await tx.membership.deleteMany({ where: { userId: targetUserId } });
-      }
-
+      // UserRole is ON DELETE RESTRICT, so it must still go first.
       await tx.userRole.deleteMany({ where: { userId: targetUserId } });
 
       // Finally delete the user record

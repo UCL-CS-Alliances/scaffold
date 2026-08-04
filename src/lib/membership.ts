@@ -37,38 +37,25 @@ export async function getMembershipForOrganisation(
   client: MembershipClient,
   organisationId: number,
 ): Promise<OrganisationMembership | null> {
-  // Until Membership is re-keyed, one organisation can still hold several rows
-  // — one per contact, and more if a member was suspended and reactivated.
-  // Highest tier rank wins, ties broken by lowest id, which is the same rule
-  // the backfill migration will apply when it collapses them.
-  const memberships = await client.membership.findMany({
-    where: { organisationId, isActive: true },
+  const membership = await client.membership.findUnique({
+    where: { organisationId },
     include: { membershipTier: true, organisation: true },
   });
 
-  if (!memberships.length) return null;
-
-  const best = memberships.reduce((winner, current) => {
-    if (current.membershipTier.rank !== winner.membershipTier.rank) {
-      return current.membershipTier.rank > winner.membershipTier.rank
-        ? current
-        : winner;
-    }
-    return current.id < winner.id ? current : winner;
-  }, memberships[0]);
+  if (!membership || !membership.isActive) return null;
 
   return {
-    membershipId: best.id,
-    organisationId: best.organisationId,
-    organisationName: best.organisation.name,
-    membershipTierId: best.membershipTierId,
-    tierKey: best.membershipTier.key,
-    tierLabel: best.membershipTier.label,
-    tierRank: best.membershipTier.rank,
-    isActive: best.isActive,
-    status: best.status,
-    managerName: best.managerName,
-    expiry: best.expiry,
+    membershipId: membership.id,
+    organisationId: membership.organisationId,
+    organisationName: membership.organisation.name,
+    membershipTierId: membership.membershipTierId,
+    tierKey: membership.membershipTier.key,
+    tierLabel: membership.membershipTier.label,
+    tierRank: membership.membershipTier.rank,
+    isActive: membership.isActive,
+    status: membership.status,
+    managerName: membership.managerName,
+    expiry: membership.expiry,
   };
 }
 

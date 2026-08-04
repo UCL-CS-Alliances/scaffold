@@ -45,44 +45,33 @@ export async function getAdminDashboardSummary(): Promise<AdminDashboardSummary>
       orderBy: { rank: "asc" },
       select: { id: true, key: true, label: true, rank: true },
     }),
+    // Qualified by the organisation having at least one MEMBER contact.
+    // Filtering through the membership's own user is no longer possible, and
+    // was wrong anyway: after the collapse that column held whichever contact
+    // happened to win, so an organisation could drop out of every total purely
+    // because that person lacked the MEMBER role.
     prisma.membership.findMany({
       where: {
         isActive: true,
-        user: memberRole
-          ? {
-              roles: {
-                some: { roleId: memberRole.id },
-              },
-            }
+        organisation: memberRole
+          ? { users: { some: { roles: { some: { roleId: memberRole.id } } } } }
           : undefined,
       },
       select: {
         organisationId: true,
         membershipTierId: true,
-        membershipTier: { select: { rank: true } },
       },
     }),
   ]);
 
-  // Counting organisations rather than membership rows. Until Membership is
-  // re-keyed one organisation can hold a row per contact, so counting rows
-  // would bill a two-contact partner twice. Highest rank wins per organisation
-  // — the same rule getMembershipForOrganisation applies, so these totals agree
-  // with the tier each member actually sees.
-  const tierByOrganisation = new Map<number, { tierId: number; rank: number }>();
-  for (const m of memberships) {
-    const current = tierByOrganisation.get(m.organisationId);
-    if (!current || m.membershipTier.rank > current.rank) {
-      tierByOrganisation.set(m.organisationId, {
-        tierId: m.membershipTierId,
-        rank: m.membershipTier.rank,
-      });
-    }
-  }
-
+  // One membership row per organisation now, so the row count is the
+  // organisation count and no per-organisation deduplication is needed.
   const countByTierId = new Map<number, number>();
-  for (const { tierId } of tierByOrganisation.values()) {
-    countByTierId.set(tierId, (countByTierId.get(tierId) ?? 0) + 1);
+  for (const m of memberships) {
+    countByTierId.set(
+      m.membershipTierId,
+      (countByTierId.get(m.membershipTierId) ?? 0) + 1,
+    );
   }
 
   const tierSummaries: AdminTierSummary[] = tiers.map((tier) => ({
@@ -94,7 +83,7 @@ export async function getAdminDashboardSummary(): Promise<AdminDashboardSummary>
   }));
 
   return {
-    totalMemberOrganisations: tierByOrganisation.size,
+    totalMemberOrganisations: memberships.length,
     tiers: tierSummaries,
   };
 }

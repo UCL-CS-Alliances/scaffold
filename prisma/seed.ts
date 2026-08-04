@@ -488,11 +488,7 @@ async function main() {
     // must not reassign the organisation's membership to a different contact.
     const membership = await prisma.membership.upsert({
       where: { organisationId: organisation.id },
-      create: {
-        userId: user.id,
-        organisationId: organisation.id,
-        ...membershipFields,
-      },
+      create: { organisationId: organisation.id, ...membershipFields },
       update: membershipFields,
     });
 
@@ -536,14 +532,10 @@ async function main() {
       create: {
         memberKey: m.id,
         organisationId: organisation.id,
-        userId: user.id,
-        membershipId: membership.id,
         redeemedBenefitCodes: redeemed,
       },
       update: {
         memberKey: m.id,
-        userId: user.id,
-        membershipId: membership.id,
         redeemedBenefitCodes: redeemed,
       },
     });

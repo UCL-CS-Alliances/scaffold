@@ -4,7 +4,6 @@
 import { prisma } from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { recordAuditLog } from "@/lib/audit-log";
-import { getMembershipForOrganisation } from "@/lib/membership";
 import { BENEFITS, type BenefitId } from "@/content/benefits";
 
 function requireAdmin(roleKeys: unknown) {
@@ -15,7 +14,7 @@ function requireAdmin(roleKeys: unknown) {
 }
 
 export async function saveRedeemedBenefitsAction(input: {
-  userId: string;
+  organisationId: number;
   redeemedBenefitCodes: BenefitId[];
 }) {
   const session = await getServerAuthSession();
@@ -33,31 +32,20 @@ export async function saveRedeemedBenefitsAction(input: {
     if (!allowed.has(code)) throw new Error(`Unknown benefit code: ${code}`);
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: input.userId },
-    include: { organisation: true },
+  const organisationId = input.organisationId;
+
+  const organisation = await prisma.organisation.findUnique({
+    where: { id: organisationId },
+    select: { slug: true },
   });
 
-  if (!user) throw new Error("User not found.");
+  if (!organisation) throw new Error("Organisation not found.");
 
-  if (!user.organisationId) {
-    throw new Error(
-      "Benefit redemption is recorded against an organisation. Assign this user an organisation first.",
-    );
-  }
-
-  const organisationId = user.organisationId;
-
-  // Redemption is the organisation's, so the projection is keyed on the
-  // organisation: a save by one contact updates the row their colleague
-  // already holds rather than creating a second one.
+  // Redemption is the organisation's: a save made by one contact updates the
+  // same row their colleague sees.
   const existing = await prisma.membershipDashboardMember.findUnique({
     where: { organisationId },
   });
-
-  // Resolved before the transaction opens: on the pooled production connection
-  // a query on the global client inside an open transaction deadlocks it.
-  const membership = await getMembershipForOrganisation(prisma, organisationId);
 
   // Diff against the stored set: the action replaces the whole array, so the
   // audit record needs added/removed computed here rather than just the new
@@ -84,20 +72,16 @@ export async function saveRedeemedBenefitsAction(input: {
       });
       if (hasChanges) {
         await recordAuditLog(tx, {
-          entityType: "MembershipDashboardMember",
-          // Target User.id, not the projection row id, so member-history
-          // queries hit the (entityType, entityId) index.
-          //
-          // The redemption state is now the organisation's but the trail is
-          // still keyed per contact, so a save made by one colleague does not
-          // appear in the other's history. Re-keying it to the organisation is
-          // deferred to the migration that moves the projection itself, which
-          // can rewrite the historical rows at the same time.
-          entityId: user.id,
+          // Keyed on the organisation, so the trail is shared by its contacts
+          // and survives any one of them being deleted. Historical rows written
+          // against a User.id were re-keyed to this shape by the contract
+          // migration, which preserved their original keys in `data`.
+          entityType: "OrganisationBenefitRedemption",
+          entityId: String(organisationId),
           action: "UPDATE",
           actorId,
           data: {
-            targetUserId: user.id,
+            organisationId,
             memberKey: existing.memberKey,
             actorEmail,
             previous,
@@ -110,13 +94,11 @@ export async function saveRedeemedBenefitsAction(input: {
       return;
     }
 
-    const memberKey = user.organisation?.slug ?? `org-${organisationId}`;
+    const memberKey = organisation.slug;
 
     await tx.membershipDashboardMember.create({
       data: {
         organisationId,
-        userId: user.id,
-        membershipId: membership?.membershipId ?? null,
         memberKey,
         redeemedBenefitCodes: input.redeemedBenefitCodes,
       },
@@ -124,12 +106,12 @@ export async function saveRedeemedBenefitsAction(input: {
 
     if (hasChanges) {
       await recordAuditLog(tx, {
-        entityType: "MembershipDashboardMember",
-        entityId: user.id,
+        entityType: "OrganisationBenefitRedemption",
+        entityId: String(organisationId),
         action: "CREATE",
         actorId,
         data: {
-          targetUserId: user.id,
+          organisationId,
           memberKey,
           actorEmail,
           previous,

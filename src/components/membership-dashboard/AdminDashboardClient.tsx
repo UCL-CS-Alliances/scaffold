@@ -233,12 +233,14 @@ export default function AdminDashboardClient(props: {
   }, [selectedUserId, selectedMember]);
 
   async function saveBenefits() {
-    if (!selectedUserId) return;
+    const organisationId = selectedMember?.organisationId;
+    if (organisationId == null) return;
+
     const redeemedBenefitCodes = Array.from(draftRedeemed);
 
     startTransition(async () => {
       await saveRedeemedBenefitsAction({
-        userId: selectedUserId,
+        organisationId,
         redeemedBenefitCodes,
       });
       router.refresh();
@@ -494,6 +496,15 @@ export default function AdminDashboardClient(props: {
             ) : (
               <>
                 <h3 style={{ marginTop: 0 }}>Benefit redemption checklist</h3>
+
+                <p className="small" style={{ marginTop: ".25rem" }}>
+                  Benefits are recorded for{" "}
+                  <strong>
+                    {selectedMember?.organisationName ?? "the organisation"}
+                  </strong>{" "}
+                  as a whole, not for an individual contact. Every contact there
+                  sees the same redemption state.
+                </p>
 
                 <ul className="list-plain" style={{ marginTop: ".75rem" }}>
                   {BENEFITS.map((b) => {
