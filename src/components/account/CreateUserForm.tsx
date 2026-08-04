@@ -59,6 +59,7 @@ export default function CreateUserForm(props: { meta: Meta }) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
+  const [jobTitle, setJobTitle] = useState("");
 
   // Admin selections
   const [organisationChoice, setOrganisationChoice] = useState<
@@ -235,6 +236,7 @@ export default function CreateUserForm(props: { meta: Meta }) {
             firstName: firstName.trim(),
             lastName: lastName.trim(),
             email: email.trim().toLowerCase(),
+            jobTitle: jobTitle.trim(),
             defaultAppId: null,
           },
           admin: {
@@ -295,6 +297,13 @@ export default function CreateUserForm(props: { meta: Meta }) {
             Email
           </label>
           <input className="auth-input" id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        </div>
+
+        <div className="auth-field">
+          <label className="auth-label" htmlFor="jobTitle">
+            Job title
+          </label>
+          <input className="auth-input" id="jobTitle" value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} placeholder="Optional" />
         </div>
 
         <div className="auth-field">

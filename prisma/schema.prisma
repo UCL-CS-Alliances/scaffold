@@ -18,14 +18,20 @@ datasource db {
 // -----------------------------
 
 model User {
-  id           String @id @default(cuid())
-  email        String @unique
+  id           String  @id @default(cuid())
+  email        String  @unique
   passwordHash String
   firstName    String
   lastName     String
+  jobTitle     String?
 
   organisation   Organisation? @relation(fields: [organisationId], references: [id])
   organisationId Int?
+
+  // Who speaks for the organisation. At most one per organisation, enforced by
+  // a partial unique index that Prisma cannot express — it lives in
+  // hand-written migration SQL, and update-user demotes the incumbent on save.
+  isPrimaryContact Boolean @default(false)
 
   defaultApp   App? @relation("UserDefaultApp", fields: [defaultAppId], references: [id])
   defaultAppId Int?
@@ -42,6 +48,8 @@ model User {
 
   // Audit log relation (actor)
   auditLogs AuditLog[] @relation("AuditActor")
+
+  @@index([organisationId])
 }
 
 model Organisation {

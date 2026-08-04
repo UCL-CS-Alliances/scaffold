@@ -23,6 +23,7 @@
     name: Microsoft
     contact_first: Arun
     contact_last: Desai
+    contact_job_title: Head of University Partnerships
   membership:
     tier: silver
     status: active
@@ -35,6 +36,7 @@
       password: msft-research-demo
       first: Nia
       last: Okafor
+      job_title: Research Programme Manager
   redeemed_benefits: [B07, B11, B12]
 
 - id: google

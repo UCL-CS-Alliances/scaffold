@@ -28,6 +28,8 @@ type UserAuditSnapshot = {
   firstName: string;
   lastName: string;
   email: string;
+  jobTitle: string | null;
+  isPrimaryContact: boolean;
   defaultAppId: number | null;
   organisationId: number | null;
   roleKeys: string[];
@@ -51,6 +53,8 @@ async function getUserAuditSnapshot(
       firstName: true,
       lastName: true,
       email: true,
+      jobTitle: true,
+      isPrimaryContact: true,
       defaultAppId: true,
       organisationId: true,
       roles: { select: { role: { select: { key: true } } } },
@@ -76,6 +80,8 @@ async function getUserAuditSnapshot(
     firstName: user.firstName,
     lastName: user.lastName,
     email: user.email,
+    jobTitle: user.jobTitle,
+    isPrimaryContact: user.isPrimaryContact,
     defaultAppId: user.defaultAppId,
     organisationId: user.organisationId,
     roleKeys: user.roles.map((r) => r.role.key).sort(),
@@ -96,10 +102,14 @@ async function getUserAuditSnapshot(
 function diffUserSnapshots(before: UserAuditSnapshot, after: UserAuditSnapshot) {
   const changes: Record<string, unknown> = {};
 
+  // Any new scalar on the snapshot must be listed here too, or it silently
+  // vanishes from the audit diff.
   const userFields = [
     "firstName",
     "lastName",
     "email",
+    "jobTitle",
+    "isPrimaryContact",
     "defaultAppId",
     "organisationId",
   ] as const;
@@ -154,6 +164,11 @@ export async function POST(req: Request) {
 
   // NEW: allow defaultAppId for all users (self-edit)
   const userDefaultAppId = parseNullableNumber(userInput.defaultAppId);
+
+  // Job titles change often and belong to the person, so this is self-editable
+  // rather than admin-only. Blank is stored as null, not "".
+  const jobTitleRaw = String(userInput.jobTitle ?? "").trim();
+  const jobTitle = jobTitleRaw || null;
 
   if (!firstName || !lastName || !email) {
     return NextResponse.json(
@@ -292,7 +307,7 @@ export async function POST(req: Request) {
       }
 
       // 3) Update user record
-      const userUpdate: any = { firstName, lastName, email };
+      const userUpdate: any = { firstName, lastName, email, jobTitle };
 
       // NEW: Everyone can set their own default app
       userUpdate.defaultAppId = userDefaultAppId;
@@ -305,6 +320,34 @@ export async function POST(req: Request) {
         // otherwise userDefaultAppId already covers the common case.
         if (resolvedDefaultAppIdForAdmin !== undefined) {
           userUpdate.defaultAppId = resolvedDefaultAppIdForAdmin;
+        }
+
+        // At most one primary contact per organisation. The incumbent is
+        // demoted first: the partial unique index rejects a second true, and
+        // promoting someone should visibly displace whoever held it.
+        //
+        // Demoted against the *new* organisation, not the old one — moving a
+        // primary contact between organisations would otherwise carry the flag
+        // across and collide with the destination's existing primary. A contact
+        // with no organisation cannot be anyone's primary contact.
+        // Only touched when the caller actually sent the field, so a partial
+        // admin payload cannot silently demote an organisation's contact.
+        if (typeof admin?.isPrimaryContact === "boolean") {
+          const wantsPrimary =
+            admin.isPrimaryContact && resolvedOrganisationId != null;
+
+          if (wantsPrimary) {
+            await tx.user.updateMany({
+              where: {
+                organisationId: resolvedOrganisationId,
+                id: { not: targetUserId },
+                isPrimaryContact: true,
+              },
+              data: { isPrimaryContact: false },
+            });
+          }
+
+          userUpdate.isPrimaryContact = wantsPrimary;
         }
       }
 

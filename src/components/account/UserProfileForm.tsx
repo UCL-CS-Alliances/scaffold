@@ -82,6 +82,8 @@ export default function UserProfileForm(props: {
   const [firstName, setFirstName] = useState(initialSelf?.firstName ?? "");
   const [lastName, setLastName] = useState(initialSelf?.lastName ?? "");
   const [email, setEmail] = useState(initialSelf?.email ?? "");
+  const [jobTitle, setJobTitle] = useState("");
+  const [isPrimaryContact, setIsPrimaryContact] = useState(false);
 
   // Default app (visible to all)
   const [defaultAppId, setDefaultAppId] = useState<number | null>(null);
@@ -223,6 +225,8 @@ export default function UserProfileForm(props: {
         setFirstName(data.user.firstName ?? "");
         setLastName(data.user.lastName ?? "");
         setEmail(data.user.email ?? "");
+        setJobTitle(data.user.jobTitle ?? "");
+        setIsPrimaryContact(Boolean(data.user.isPrimaryContact));
 
         setDefaultAppId(data.user.defaultAppId ?? null);
         setDefaultAppTouched(false);
@@ -471,6 +475,7 @@ export default function UserProfileForm(props: {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           email: email.trim().toLowerCase(),
+          jobTitle: jobTitle.trim(),
           defaultAppId, // IMPORTANT: needed for non-admin updates too
         },
       };
@@ -480,6 +485,9 @@ export default function UserProfileForm(props: {
 
         payload.admin = {
           organisationChoice,
+          // Cleared alongside the organisation: a contact with no organisation
+          // cannot be its primary contact.
+          isPrimaryContact: organisationChoice ? isPrimaryContact : false,
           defaultAppId, // still okay to send
           roleChoices,
           pending: { organisations: pendingOrgs, roles: pendingRoles },
@@ -600,6 +608,19 @@ export default function UserProfileForm(props: {
               />
             </div>
 
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="jobTitle">
+                Job title
+              </label>
+              <input
+                className="auth-input"
+                id="jobTitle"
+                value={jobTitle}
+                onChange={(e) => setJobTitle(e.target.value)}
+                placeholder="Optional"
+              />
+            </div>
+
             {/* Admin fundamentals */}
             {isAdmin && meta && (
               <>
@@ -631,6 +652,34 @@ export default function UserProfileForm(props: {
                     <button type="button" className="button-link" onClick={openAddOrg}>
                       Add
                     </button>
+                  </div>
+                </div>
+
+                <div className="auth-field">
+                  <div className="tile" style={{ padding: "0.75rem" }}>
+                    <label
+                      style={{
+                        display: "flex",
+                        gap: "0.5rem",
+                        alignItems: "center",
+                        padding: "0.25rem 0",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isPrimaryContact}
+                        disabled={!organisationChoice}
+                        aria-disabled={!organisationChoice}
+                        onChange={(e) => setIsPrimaryContact(e.target.checked)}
+                      />
+                      <span>Primary contact at this organisation</span>
+                    </label>
+
+                    <p className="small" style={{ margin: 0 }}>
+                      {organisationChoice
+                        ? "Only one contact per organisation can be primary. Ticking this will unset whoever holds it now."
+                        : "Select an organisation to set a primary contact."}
+                    </p>
                   </div>
                 </div>
 

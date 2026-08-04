@@ -13,6 +13,8 @@ export type AdminMemberListItem = {
   organisationId: number;
   organisationName: string;
   contactName: string;
+  jobTitle: string | null;
+  isPrimaryContact: boolean;
   tierLabel: string;
   tierRank: number;
   tierKey: string;
@@ -25,6 +27,8 @@ export type AdminSelectedMember = {
   organisationId: number | null;
   organisationName: string | null;
   contactName: string;
+  jobTitle: string | null;
+  isPrimaryContact: boolean;
   membershipTierLabel: string;
   membershipTierKey: string | null;
   membershipTierRank: number | null;
@@ -65,11 +69,15 @@ export async function getAdminMemberList(): Promise<AdminMemberListItem[]> {
       id: true,
       firstName: true,
       lastName: true,
+      jobTitle: true,
+      isPrimaryContact: true,
       organisationId: true,
       organisation: { select: { name: true } },
     },
     orderBy: [
       { organisation: { name: "asc" } },
+      // The organisation's primary contact heads its group.
+      { isPrimaryContact: "desc" },
       { lastName: "asc" },
       { firstName: "asc" },
     ],
@@ -131,6 +139,8 @@ export async function getAdminMemberList(): Promise<AdminMemberListItem[]> {
         organisationId: u.organisationId,
         organisationName: u.organisation?.name ?? "Unknown organisation",
         contactName: `${u.firstName} ${u.lastName}`,
+        jobTitle: u.jobTitle,
+        isPrimaryContact: u.isPrimaryContact,
         tierLabel: membership.membershipTier.label,
         tierRank: membership.membershipTier.rank,
         tierKey: membership.membershipTier.key,
@@ -167,6 +177,8 @@ export async function getAdminSelectedMember(userId: string): Promise<AdminSelec
     userId: user.id,
     organisationName: user.organisation?.name ?? membership?.organisationName ?? null,
     contactName: `${user.firstName} ${user.lastName}`,
+    jobTitle: user.jobTitle,
+    isPrimaryContact: user.isPrimaryContact,
     membershipTierLabel: membership?.tierLabel ?? "Unknown tier",
     membershipTierKey: membership?.tierKey ?? null,
     membershipTierRank: membership?.tierRank ?? null,

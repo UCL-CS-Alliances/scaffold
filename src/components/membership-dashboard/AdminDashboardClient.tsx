@@ -364,8 +364,14 @@ export default function AdminDashboardClient(props: {
                           >
                             {org.items.map((m) => (
                               <li key={m.userId} style={{ marginBottom: ".35rem" }}>
-                                {m.contactName} — Last sign-in:{" "}
-                                <span>{m.lastSignedInLabel}</span>
+                                {m.contactName}
+                                {m.jobTitle?.trim() ? `, ${m.jobTitle}` : ""}
+                                {m.isPrimaryContact && (
+                                  <span className="pill" style={{ marginLeft: ".4rem" }}>
+                                    Primary contact
+                                  </span>
+                                )}{" "}
+                                — Last sign-in: <span>{m.lastSignedInLabel}</span>
                               </li>
                             ))}
                           </ul>
@@ -387,6 +393,11 @@ export default function AdminDashboardClient(props: {
                   <li>
                     <strong>Contact:</strong>{" "}
                     {selectedMember?.contactName ?? "Unknown"}
+                    {selectedMember?.isPrimaryContact ? " (primary contact)" : ""}
+                  </li>
+                  <li>
+                    <strong>Job title:</strong>{" "}
+                    {selectedMember?.jobTitle?.trim() ? selectedMember.jobTitle : "Not set"}
                   </li>
                   <li>
                     <strong>Membership tier:</strong>{" "}
