@@ -277,24 +277,13 @@ export async function getAdminBenefitRedemptionStats(): Promise<AdminBenefitRede
   }
 
   const projections = await prisma.membershipDashboardMember.findMany({
-    where: { user: { organisationId: { in: [...rankByOrganisation.keys()] } } },
-    select: {
-      redeemedBenefitCodes: true,
-      user: { select: { organisationId: true } },
-    },
+    where: { organisationId: { in: [...rankByOrganisation.keys()] } },
+    select: { organisationId: true, redeemedBenefitCodes: true },
   });
 
-  // Union across an organisation's contacts, which is what the backfill
-  // migration will collapse into a single row per organisation.
-  const redeemedByOrganisation = new Map<number, Set<string>>();
-  for (const projection of projections) {
-    const organisationId = projection.user?.organisationId;
-    if (organisationId == null) continue;
-
-    const codes = redeemedByOrganisation.get(organisationId) ?? new Set<string>();
-    projection.redeemedBenefitCodes.forEach((code) => codes.add(code));
-    redeemedByOrganisation.set(organisationId, codes);
-  }
+  const redeemedByOrganisation = new Map<number, Set<string>>(
+    projections.map((p) => [p.organisationId, new Set(p.redeemedBenefitCodes)]),
+  );
 
   const organisations = [...rankByOrganisation.entries()].map(
     ([organisationId, tierRank]) => ({

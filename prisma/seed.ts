@@ -139,28 +139,6 @@ async function assignRole(userId: string, roleId: number) {
   });
 }
 
-// Membership has no unique constraint, so repeat-safety needs a findFirst
-// rather than an upsert. Every contact at an organisation gets the same tier
-// and dates — membership belongs to the organisation, not the individual.
-async function upsertMembershipForUser(args: {
-  userId: string;
-  organisationId: number;
-  membershipTierId: number;
-  isActive: boolean;
-  status: string;
-  managerName: string | null;
-  expiry: Date | null;
-}) {
-  const { userId, organisationId, ...rest } = args;
-
-  const existing = await prisma.membership.findFirst({
-    where: { userId, organisationId },
-  });
-
-  return existing
-    ? prisma.membership.update({ where: { id: existing.id }, data: rest })
-    : prisma.membership.create({ data: { userId, organisationId, ...rest } });
-}
 
 //
 // ─────────────────────────────────────────────────────────────
@@ -456,17 +434,22 @@ async function main() {
       expiry,
     };
 
-    const membership = await upsertMembershipForUser({
-      userId: user.id,
-      organisationId: organisation.id,
-      ...membershipFields,
+    // One membership per organisation. userId is set only on create: reseeding
+    // must not reassign the organisation's membership to a different contact.
+    const membership = await prisma.membership.upsert({
+      where: { organisationId: organisation.id },
+      create: {
+        userId: user.id,
+        organisationId: organisation.id,
+        ...membershipFields,
+      },
+      update: membershipFields,
     });
 
     console.log(`  Membership id=${membership.id}, tierId=${membership.membershipTierId}`);
 
-    // Additional contacts share the organisation's tier. Only the main contact
-    // carries the dashboard projection row — memberKey is unique per
-    // organisation, and redemption is the organisation's, not theirs.
+    // Additional contacts get no membership row of their own — they occupy a
+    // seat on the organisation's, which is what every read path resolves.
     for (const extra of m.additional_users ?? []) {
       const extraPasswordHash = await hashPassword(extra.password);
 
@@ -491,24 +474,22 @@ async function main() {
 
       await assignRole(extraUser.id, memberRoleId);
 
-      await upsertMembershipForUser({
-        userId: extraUser.id,
-        organisationId: organisation.id,
-        ...membershipFields,
-      });
-
       console.log(`  Additional contact id=${extraUser.id}, email=${extraUser.email}`);
     }
 
+    // Keyed on the organisation rather than memberKey: redemption is the
+    // organisation's, and memberKey is derived from the same slug anyway.
     const dashboard = await prisma.membershipDashboardMember.upsert({
-      where: { memberKey: m.id },
+      where: { organisationId: organisation.id },
       create: {
         memberKey: m.id,
+        organisationId: organisation.id,
         userId: user.id,
         membershipId: membership.id,
         redeemedBenefitCodes: redeemed,
       },
       update: {
+        memberKey: m.id,
         userId: user.id,
         membershipId: membership.id,
         redeemedBenefitCodes: redeemed,

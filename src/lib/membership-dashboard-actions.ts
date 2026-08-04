@@ -40,24 +40,24 @@ export async function saveRedeemedBenefitsAction(input: {
 
   if (!user) throw new Error("User not found.");
 
-  // Redemption is the organisation's, so the projection row is looked up by
-  // organisation rather than by contact. Looking it up per user would miss the
-  // row a colleague already holds and take the create branch below — and
-  // memberKey is unique per organisation slug, so that would fail with P2002.
-  const existing = user.organisationId
-    ? await prisma.membershipDashboardMember.findFirst({
-        where: { user: { organisationId: user.organisationId } },
-        orderBy: { id: "asc" },
-      })
-    : await prisma.membershipDashboardMember.findUnique({
-        where: { userId: user.id },
-      });
+  if (!user.organisationId) {
+    throw new Error(
+      "Benefit redemption is recorded against an organisation. Assign this user an organisation first.",
+    );
+  }
+
+  const organisationId = user.organisationId;
+
+  // Redemption is the organisation's, so the projection is keyed on the
+  // organisation: a save by one contact updates the row their colleague
+  // already holds rather than creating a second one.
+  const existing = await prisma.membershipDashboardMember.findUnique({
+    where: { organisationId },
+  });
 
   // Resolved before the transaction opens: on the pooled production connection
   // a query on the global client inside an open transaction deadlocks it.
-  const membership = user.organisationId
-    ? await getMembershipForOrganisation(prisma, user.organisationId)
-    : null;
+  const membership = await getMembershipForOrganisation(prisma, organisationId);
 
   // Diff against the stored set: the action replaces the whole array, so the
   // audit record needs added/removed computed here rather than just the new
@@ -110,10 +110,11 @@ export async function saveRedeemedBenefitsAction(input: {
       return;
     }
 
-    const memberKey = user.organisation?.slug ?? `user-${user.id.slice(0, 12)}`;
+    const memberKey = user.organisation?.slug ?? `org-${organisationId}`;
 
     await tx.membershipDashboardMember.create({
       data: {
+        organisationId,
         userId: user.id,
         membershipId: membership?.membershipId ?? null,
         memberKey,

@@ -45,12 +45,17 @@ model User {
 }
 
 model Organisation {
-  id          Int              @id @default(autoincrement())
-  name        String
-  slug        String           @unique
-  type        OrganisationType
-  users       User[]
-  memberships Membership[]
+  id    Int              @id @default(autoincrement())
+  name  String
+  slug  String           @unique
+  type  OrganisationType
+  users User[]
+
+  // One membership per organisation: the partner buys the tier and its
+  // contacts occupy seats on it. Benefit redemption is likewise the
+  // organisation's — a free workshop is consumed once, not once per contact.
+  membership      Membership?
+  dashboardMember MembershipDashboardMember?
 }
 
 enum OrganisationType {
@@ -97,7 +102,7 @@ model Membership {
   userId String
 
   organisation   Organisation @relation(fields: [organisationId], references: [id])
-  organisationId Int
+  organisationId Int          @unique
 
   membershipTier   MembershipTier @relation(fields: [membershipTierId], references: [id])
   membershipTierId Int
@@ -112,8 +117,8 @@ model Membership {
   // 1–1 relation to dashboard projection
   dashboardEntry MembershipDashboardMember? @relation("MembershipDashboardEntry")
 
+  // No @@index([organisationId]) — the unique index above already covers it.
   @@index([userId])
-  @@index([organisationId])
   @@index([membershipTierId])
 }
 
@@ -166,6 +171,12 @@ model MembershipDashboardMember {
 
   membership   Membership? @relation("MembershipDashboardEntry", fields: [membershipId], references: [id])
   membershipId Int?        @unique
+
+  // The organisation owns the redemption state. userId and membershipId are
+  // kept for now so this migration drops nothing and un-rebased deployments
+  // keep working; they are removed once every write path is org-keyed.
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  organisationId Int          @unique
 
   // YAML id for easy mapping
   memberKey String @unique // e.g. "chanel", "microsoft"

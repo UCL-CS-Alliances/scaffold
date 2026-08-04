@@ -89,18 +89,14 @@ export async function getMembershipForUser(
 
 /**
  * Redeemed benefit codes for an organisation. Redemption is the organisation's
- * — a partner's free workshop is consumed once, not once per contact. Until the
- * projection is re-keyed it is reached through whichever contact holds the row;
- * lowest id keeps that choice stable, and the backfill migration unions these
- * into a single row per organisation.
+ * — a partner's free workshop is consumed once, not once per contact.
  */
 export async function getRedeemedBenefitCodesForOrganisation(
   client: MembershipClient,
   organisationId: number,
 ): Promise<string[]> {
-  const projection = await client.membershipDashboardMember.findFirst({
-    where: { user: { organisationId } },
-    orderBy: { id: "asc" },
+  const projection = await client.membershipDashboardMember.findUnique({
+    where: { organisationId },
     select: { redeemedBenefitCodes: true },
   });
 
