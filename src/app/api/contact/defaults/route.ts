@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { prisma } from "@/lib/prisma";
 import { getSatTeamManager, resolveManagerByName } from "@/content/contactRouting";
+import { getMembershipForOrganisation } from "@/lib/membership";
 
 export async function GET() {
   const session = await getServerAuthSession();
@@ -34,18 +35,20 @@ export async function GET() {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: {
-      organisation: true,
-      memberships: {
-        where: { isActive: true },
-        select: { managerName: true },
-        take: 1,
-      },
+    select: {
+      organisationId: true,
+      organisation: { select: { name: true } },
     },
   });
 
+  // The client experience manager is assigned to the organisation, so every
+  // contact there routes to the same person.
+  const membership = user?.organisationId
+    ? await getMembershipForOrganisation(prisma, user.organisationId)
+    : null;
+
   const organisation = user?.organisation?.name ?? "";
-  const managerNameRaw = user?.memberships?.[0]?.managerName ?? null;
+  const managerNameRaw = membership?.managerName ?? null;
 
   const defaultManager =
     resolveManagerByName(managerNameRaw) ?? getSatTeamManager();

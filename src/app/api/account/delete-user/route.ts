@@ -70,14 +70,14 @@ export async function POST(req: Request) {
         });
       }
 
-      // Delete dependents first. userRole and membership are ON DELETE RESTRICT,
-      // so the user delete fails without this. The membership-dashboard
-      // projection is ON DELETE SET NULL, so the opposite problem: left alone it
-      // survives the member as an orphaned row still holding their
-      // redeemedBenefitCodes and its @unique memberKey.
-      await tx.membershipDashboardMember.deleteMany({ where: { userId: targetUserId } });
+      // The organisation's membership and redemption history deliberately
+      // survive the contact: an organisation is a member independently of which
+      // of its people hold logins, and destroying its redemption record because
+      // someone left would be data loss. Neither table references the user any
+      // more, so there is nothing to reassign or clean up.
+      //
+      // UserRole is ON DELETE RESTRICT, so it must still go first.
       await tx.userRole.deleteMany({ where: { userId: targetUserId } });
-      await tx.membership.deleteMany({ where: { userId: targetUserId } });
 
       // Finally delete the user record
       await tx.user.delete({ where: { id: targetUserId } });

@@ -87,27 +87,23 @@ export default async function MembershipDashboardPage(props: Props) {
     const tab = pickFirst(sp?.tab) ?? null; // "members" | "benefits" | "handbook"
     const chapter = pickFirst(sp?.chapter) ?? null;
 
-    const [
-      summary,
-      members,
-      selectedMember,
-      benefitStats,
-      handbook,
-      totalUsers,
-      benefitAuditTrail,
-    ] = await Promise.all([
-      getAdminDashboardSummary(),
-      getAdminMemberList(),
-      selectedUserId
-        ? getAdminSelectedMember(selectedUserId)
-        : Promise.resolve(null),
-      getAdminBenefitRedemptionStats(),
-      renderHandbookChapterBySlug(chapter ?? undefined),
-      prisma.user.count(),
-      selectedUserId
-        ? getAdminBenefitAuditTrail(selectedUserId)
-        : Promise.resolve([]),
-    ]);
+    const [summary, members, selectedMember, benefitStats, handbook, totalUsers] =
+      await Promise.all([
+        getAdminDashboardSummary(),
+        getAdminMemberList(),
+        selectedUserId
+          ? getAdminSelectedMember(selectedUserId)
+          : Promise.resolve(null),
+        getAdminBenefitRedemptionStats(),
+        renderHandbookChapterBySlug(chapter ?? undefined),
+        prisma.user.count(),
+      ]);
+
+    // The trail belongs to the organisation, so it needs the selected member's
+    // organisation and cannot join the batch above.
+    const benefitAuditTrail = selectedMember?.organisationId
+      ? await getAdminBenefitAuditTrail(selectedMember.organisationId)
+      : [];
 
     const payingRevenue = computeRevenueFromTiers(summary.tiers);
 

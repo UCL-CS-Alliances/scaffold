@@ -61,7 +61,7 @@ export default async function AccountPage(props: AccountPageProps) {
             id: true,
             firstName: true,
             lastName: true,
-            organisation: { select: { name: true } },
+            organisation: { select: { id: true, name: true } },
           },
           orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
         }),
@@ -109,9 +109,15 @@ export default async function AccountPage(props: AccountPageProps) {
         adminData={
           isAdmin && users && adminMeta
             ? {
+                // `name` labels the option inside its organisation group;
+                // `label` still carries the organisation for the "Currently
+                // editing" line, which is read outside that grouping context.
                 users: users.map((u) => ({
                   id: u.id,
+                  name: `${u.firstName} ${u.lastName}`,
                   label: `${u.firstName} ${u.lastName} (${u.organisation?.name ?? "No organisation"})`,
+                  organisationId: u.organisation?.id ?? null,
+                  organisationName: u.organisation?.name ?? null,
                 })),
                 meta: adminMeta,
               }

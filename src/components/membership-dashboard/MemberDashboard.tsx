@@ -5,10 +5,10 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
 import {
-  BENEFITS,
-  MEMBERSHIP_TIER_RANK,
-  MembershipTierKey,
-} from "@/content/benefits";
+  getEffectiveBenefits,
+  hasBenefitAccess,
+  resolveMemberRank,
+} from "@/lib/benefit-access";
 import SecondaryNav from "@/components/membership-dashboard/SecondaryNav";
 import BenefitsFilterToolbar from "@/components/membership-dashboard/BenefitsFilterToolbar";
 
@@ -27,14 +27,6 @@ type MemberDashboardProps = {
 
 type BenefitFilter = "redeemed" | "available" | "locked" | null;
 
-function normaliseTierKey(key: string | null): MembershipTierKey | null {
-  if (!key) return null;
-  const lower = key.toLowerCase() as MembershipTierKey;
-  return ["bronze", "silver", "gold", "platinum"].includes(lower)
-    ? lower
-    : null;
-}
-
 export default function MemberDashboard(props: MemberDashboardProps) {
   const {
     firstName,
@@ -49,32 +41,12 @@ export default function MemberDashboard(props: MemberDashboardProps) {
 
   const [filter, setFilter] = useState<BenefitFilter>(null);
 
-  const normTierKey = normaliseTierKey(membershipTierKey);
-  const myRank =
-    membershipTierRank ??
-    (normTierKey ? MEMBERSHIP_TIER_RANK[normTierKey] : null);
+  const myRank = resolveMemberRank(membershipTierRank, membershipTierKey);
 
   const redeemed = useMemo(() => new Set(redeemedBenefitCodes), [redeemedBenefitCodes]);
 
-  // Superseded benefits
-  const superseded = useMemo(() => {
-    const s = new Set<string>();
-    if (myRank !== null) {
-      BENEFITS.forEach((b) => {
-        if (!b.supersedes || !b.supersedes.length) return;
-        const needed = MEMBERSHIP_TIER_RANK[b.tierMin];
-        if (myRank >= needed) {
-          b.supersedes.forEach((id) => s.add(id));
-        }
-      });
-    }
-    return s;
-  }, [myRank]);
-
-  const benefitsEffective = useMemo(
-    () => BENEFITS.filter((b) => !superseded.has(b.id)),
-    [superseded],
-  );
+  // Benefits superseded by a better one the member already has are hidden
+  const benefitsEffective = useMemo(() => getEffectiveBenefits(myRank), [myRank]);
 
   const formattedExpiry =
     membershipExpiry != null
@@ -92,12 +64,10 @@ export default function MemberDashboard(props: MemberDashboardProps) {
   // Build benefit rows with computed state
   const benefitRows = useMemo(() => {
     return benefitsEffective.map((b) => {
-      const neededRank = MEMBERSHIP_TIER_RANK[b.tierMin];
-
       let state: Exclude<BenefitFilter, null> = "locked";
       let symbol = "🔒";
 
-      if (myRank !== null && myRank >= neededRank) {
+      if (hasBenefitAccess(myRank, b.tierMin)) {
         if (redeemed.has(b.id)) {
           state = "redeemed";
           symbol = "✅";

@@ -22,6 +22,7 @@ type RawMember = {
     name: string;
     contact_first: string;
     contact_last: string;
+    contact_job_title?: string;
   };
   membership: {
     tier: 'bronze' | 'silver' | 'gold' | 'platinum';
@@ -29,6 +30,16 @@ type RawMember = {
     expiry?: string | Date;
     manager?: string;
   };
+  // Further contacts at the same organisation, beyond the main one in
+  // `company`. They share the organisation's tier — membership is a property of
+  // the organisation, not of the individual.
+  additional_users?: {
+    email: string;
+    password: string;
+    first: string;
+    last: string;
+    job_title?: string;
+  }[];
   redeemed_benefits?: string[];
 };
 
@@ -129,6 +140,7 @@ async function assignRole(userId: string, roleId: number) {
     update: {},
   });
 }
+
 
 //
 // ─────────────────────────────────────────────────────────────
@@ -267,6 +279,10 @@ async function seedDemoUsers(
     roleKey: SeedRoleKey;
     organisationId: number;
     defaultAppId: number;
+    jobTitle: string;
+    // UCL Computer Science carries all three demo users, so it is the
+    // organisation that exercises the primary-contact flag out of the box.
+    isPrimaryContact: boolean;
   }[] = [
     {
       email: 'admin@alliances.example.com',
@@ -276,6 +292,8 @@ async function seedDemoUsers(
       roleKey: 'ADMIN',
       organisationId: organisation.id,
       defaultAppId: apps.membershipDashboard.id,
+      jobTitle: 'Strategic Alliances Manager',
+      isPrimaryContact: true,
     },
     {
       email: 'student@ucl.example.com',
@@ -285,6 +303,8 @@ async function seedDemoUsers(
       roleKey: 'STUDENT',
       organisationId: organisation.id,
       defaultAppId: apps.talent.id,
+      jobTitle: 'MSc Computer Science Student',
+      isPrimaryContact: false,
     },
     {
       email: 'module.leader@ucl.example.com',
@@ -294,8 +314,24 @@ async function seedDemoUsers(
       roleKey: 'MODULE_LEADER',
       organisationId: organisation.id,
       defaultAppId: apps.ixn.id,
+      jobTitle: 'Module Leader, Systems Engineering',
+      isPrimaryContact: false,
     },
   ];
+
+  // Demote before promoting, for the same reason as the member loop: the
+  // partial unique index rejects a second primary contact.
+  const primaryDemoUser = demoUsers.find((d) => d.isPrimaryContact);
+  if (primaryDemoUser) {
+    await prisma.user.updateMany({
+      where: {
+        organisationId: organisation.id,
+        email: { not: primaryDemoUser.email },
+        isPrimaryContact: true,
+      },
+      data: { isPrimaryContact: false },
+    });
+  }
 
   for (const demoUser of demoUsers) {
     const roleId = roleIdByKey.get(demoUser.roleKey);
@@ -310,15 +346,19 @@ async function seedDemoUsers(
         passwordHash: await hashPassword(demoUser.password),
         firstName: demoUser.firstName,
         lastName: demoUser.lastName,
+        jobTitle: demoUser.jobTitle,
         organisationId: demoUser.organisationId,
         defaultAppId: demoUser.defaultAppId,
+        isPrimaryContact: demoUser.isPrimaryContact,
       },
       update: {
         passwordHash: await hashPassword(demoUser.password),
         firstName: demoUser.firstName,
         lastName: demoUser.lastName,
+        jobTitle: demoUser.jobTitle,
         organisationId: demoUser.organisationId,
         defaultAppId: demoUser.defaultAppId,
+        isPrimaryContact: demoUser.isPrimaryContact,
       },
     });
 
@@ -387,16 +427,36 @@ async function main() {
         passwordHash,
         firstName: m.company.contact_first,
         lastName: m.company.contact_last,
+        jobTitle: m.company.contact_job_title ?? null,
         organisationId: organisation.id,
         defaultAppId: apps.membershipDashboard.id,
       },
       update: {
         firstName: m.company.contact_first,
         lastName: m.company.contact_last,
+        jobTitle: m.company.contact_job_title ?? null,
         organisationId: organisation.id,
         passwordHash,
         defaultAppId: apps.membershipDashboard.id,
       },
+    });
+
+    // Demote unconditionally before promoting. Setting the new primary first
+    // would collide with the partial unique index on any reseed where the
+    // fixture's designated contact has changed — a bug that passes run 1 and
+    // fails run 2.
+    await prisma.user.updateMany({
+      where: {
+        organisationId: organisation.id,
+        id: { not: user.id },
+        isPrimaryContact: true,
+      },
+      data: { isPrimaryContact: false },
+    });
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { isPrimaryContact: true },
     });
     console.log(`  User id=${user.id}, email=${user.email}`);
     await assignRole(user.id, memberRoleId);
@@ -416,49 +476,66 @@ async function main() {
     }
     const isActive = m.membership.status === 'active';
 
-    const existingMembership = await prisma.membership.findFirst({
-      where: {
-        userId: user.id,
-        organisationId: organisation.id,
-      },
-    });
+    const membershipFields = {
+      membershipTierId: tierId,
+      isActive,
+      status: m.membership.status,
+      managerName: m.membership.manager ?? null,
+      expiry,
+    };
 
-    const membership = existingMembership
-      ? await prisma.membership.update({
-          where: { id: existingMembership.id },
-          data: {
-            membershipTierId: tierId,
-            isActive,
-            status: m.membership.status,
-            managerName: m.membership.manager ?? null,
-            expiry,
-          },
-        })
-      : await prisma.membership.create({
-          data: {
-            userId: user.id,
-            organisationId: organisation.id,
-            membershipTierId: tierId,
-            isActive,
-            status: m.membership.status,
-            managerName: m.membership.manager ?? null,
-            expiry,
-          },
-        });
+    // One membership per organisation. userId is set only on create: reseeding
+    // must not reassign the organisation's membership to a different contact.
+    const membership = await prisma.membership.upsert({
+      where: { organisationId: organisation.id },
+      create: { organisationId: organisation.id, ...membershipFields },
+      update: membershipFields,
+    });
 
     console.log(`  Membership id=${membership.id}, tierId=${membership.membershipTierId}`);
 
+    // Additional contacts get no membership row of their own — they occupy a
+    // seat on the organisation's, which is what every read path resolves.
+    for (const extra of m.additional_users ?? []) {
+      const extraPasswordHash = await hashPassword(extra.password);
+
+      const extraUser = await prisma.user.upsert({
+        where: { email: extra.email },
+        create: {
+          email: extra.email,
+          passwordHash: extraPasswordHash,
+          firstName: extra.first,
+          lastName: extra.last,
+          jobTitle: extra.job_title ?? null,
+          organisationId: organisation.id,
+          defaultAppId: apps.membershipDashboard.id,
+        },
+        update: {
+          firstName: extra.first,
+          lastName: extra.last,
+          jobTitle: extra.job_title ?? null,
+          organisationId: organisation.id,
+          passwordHash: extraPasswordHash,
+          defaultAppId: apps.membershipDashboard.id,
+        },
+      });
+
+      await assignRole(extraUser.id, memberRoleId);
+
+      console.log(`  Additional contact id=${extraUser.id}, email=${extraUser.email}`);
+    }
+
+    // Keyed on the organisation rather than memberKey: redemption is the
+    // organisation's, and memberKey is derived from the same slug anyway.
     const dashboard = await prisma.membershipDashboardMember.upsert({
-      where: { memberKey: m.id },
+      where: { organisationId: organisation.id },
       create: {
         memberKey: m.id,
-        userId: user.id,
-        membershipId: membership.id,
+        organisationId: organisation.id,
         redeemedBenefitCodes: redeemed,
       },
       update: {
-        userId: user.id,
-        membershipId: membership.id,
+        memberKey: m.id,
         redeemedBenefitCodes: redeemed,
       },
     });
