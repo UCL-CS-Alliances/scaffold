@@ -316,6 +316,12 @@ export async function POST(req: Request) {
         isAdminAfterSave = wasAdmin;
       }
 
+      // Whether this save moves the contact to a different organisation.
+      // Membership and primary-contact status are both organisation-wide, so
+      // several decisions below turn on it.
+      const organisationChanged =
+        isAdmin && resolvedOrganisationId !== (before?.organisationId ?? null);
+
       // 3) Update user record
       const userUpdate: any = { firstName, lastName, email, jobTitle };
 
@@ -358,6 +364,13 @@ export async function POST(req: Request) {
           }
 
           userUpdate.isPrimaryContact = wantsPrimary;
+        } else if (organisationChanged) {
+          // The field was omitted but the contact is moving. Left alone they
+          // would carry primary status into the destination, where the partial
+          // unique index rejects it and fails the whole transaction with a raw
+          // Prisma error. Primary status is per organisation, so a move clears
+          // it: the destination's admin re-assigns deliberately.
+          userUpdate.isPrimaryContact = false;
         }
       }
 
@@ -382,8 +395,21 @@ export async function POST(req: Request) {
         }
       }
 
-      // 5) Update single membership (admin only, only if tier is set)
-      if (isAdmin && admin?.membership && resolvedMembershipTierId) {
+      // 5) Update the organisation's membership (admin only, only if tier is set)
+      //
+      // Skipped entirely when this save moves the contact to a different
+      // organisation. The membership fields in the payload were loaded from the
+      // contact's *old* organisation, and the upsert below keys on the new one —
+      // so writing them would overwrite the destination's tier, status, manager
+      // and expiry with the origin's, for every contact there at once, while
+      // leaving the origin untouched. A contact who moves simply inherits the
+      // destination's membership; changing it is a separate, deliberate edit.
+      if (
+        isAdmin &&
+        admin?.membership &&
+        resolvedMembershipTierId &&
+        !organisationChanged
+      ) {
         const expiry = parseUkDateOrNull(admin.membership.expiryText);
 
         // membership requires an organisation

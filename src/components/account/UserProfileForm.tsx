@@ -93,6 +93,11 @@ export default function UserProfileForm(props: {
   const lastAppliedPresetAppIdRef = useRef<number | null>(null);
 
   // Admin-only selections
+  // The organisation this contact belonged to when the form loaded. The
+  // membership fields below describe *that* organisation's membership, so once
+  // the selection moves away from it they no longer describe anything editable.
+  const [loadedOrganisationId, setLoadedOrganisationId] = useState<number | null>(null);
+
   const [organisationChoice, setOrganisationChoice] = useState<
     { kind: "existing"; id: number } | { kind: "pending"; clientId: string } | null
   >(null);
@@ -173,6 +178,17 @@ export default function UserProfileForm(props: {
     return isAdmin ? selectedRoleKeys.includes("MEMBER") : false;
   }, [isAdmin, selectedRoleKeys]);
 
+  // Moving a contact to another organisation makes them inherit that
+  // organisation's membership; it does not carry their old one across. The
+  // server skips the membership write in that case, so the fields are hidden
+  // rather than left editable-but-ignored.
+  const organisationChanged = useMemo(() => {
+    if (!isAdmin) return false;
+    if (!organisationChoice) return loadedOrganisationId != null;
+    if (organisationChoice.kind === "pending") return true;
+    return organisationChoice.id !== loadedOrganisationId;
+  }, [isAdmin, organisationChoice, loadedOrganisationId]);
+
   const isAdminRoleChecked = useMemo(() => {
     if (!isAdmin) return false;
     return selectedRoleKeys.includes("ADMIN");
@@ -252,6 +268,8 @@ export default function UserProfileForm(props: {
 
           const keys: string[] = data.user.roleKeys ?? [];
           setRoleChoices(keys.map((k) => ({ kind: "existing", key: k })));
+
+          setLoadedOrganisationId(data.user.organisationId ?? null);
 
           setMembershipTierId(data.membershipEdit?.membershipTierId ?? null);
           setMembershipStatus((data.membershipEdit?.status ?? "active") || "active");
@@ -487,11 +505,18 @@ export default function UserProfileForm(props: {
           organisationChoice,
           // Cleared alongside the organisation: a contact with no organisation
           // cannot be its primary contact.
-          isPrimaryContact: organisationChoice ? isPrimaryContact : false,
+          // Also cleared on a move: primary status belongs to the organisation
+          // the contact is leaving, and carrying it across would collide with
+          // the destination's existing primary contact.
+          isPrimaryContact:
+            organisationChoice && !organisationChanged ? isPrimaryContact : false,
           defaultAppId, // still okay to send
           roleChoices,
           pending: { organisations: pendingOrgs, roles: pendingRoles },
-          membership: isMemberRoleSelected
+          // Sent as empty on a move so the server skips the membership write —
+          // these values describe the organisation being left, not the one
+          // being joined. The server enforces this independently.
+          membership: isMemberRoleSelected && !organisationChanged
             ? {
                 membershipTierId,
                 status: (membershipStatus || "active").trim() || "active",
@@ -718,9 +743,28 @@ export default function UserProfileForm(props: {
         </div>
 
         {/* Membership (admin-only, only if MEMBER role selected) */}
-        {isAdmin && meta && isMemberRoleSelected && (
+        {isAdmin && meta && isMemberRoleSelected && organisationChanged && (
           <div className="tile" style={{ padding: "0.95rem" }}>
             <h3 style={{ marginTop: 0 }}>Membership</h3>
+
+            <p className="small" style={{ marginTop: 0, marginBottom: 0 }}>
+              This contact is being moved to a different organisation. Membership
+              belongs to the organisation, not the person, so they will inherit
+              the destination&rsquo;s tier, status, manager and expiry on save —
+              nothing is carried across. Save this change first, then edit the
+              destination&rsquo;s membership if it needs to change.
+            </p>
+          </div>
+        )}
+
+        {isAdmin && meta && isMemberRoleSelected && !organisationChanged && (
+          <div className="tile" style={{ padding: "0.95rem" }}>
+            <h3 style={{ marginTop: 0 }}>Membership</h3>
+
+            <p className="small" style={{ marginTop: 0 }}>
+              These values belong to the whole organisation. Editing them here
+              changes what every contact there sees.
+            </p>
 
             <div className="stack" style={{ ["--stack-gap" as any]: "0.85rem" }}>
               <div className="auth-field">

@@ -1,10 +1,18 @@
 -- Expand step of an expand/contract move: membership and benefit redemption
 -- become properties of the organisation rather than of the individual contact.
 --
--- This migration DROPS NOTHING. Membership.userId and
--- MembershipDashboardMember.userId / .membershipId all survive, so a deployment
--- running the previous code against a migrated database keeps working. The
--- destructive column drops land in a later, separate migration.
+-- This migration drops no COLUMNS. Membership.userId and
+-- MembershipDashboardMember.userId / .membershipId all survive, so pre-contract
+-- code still compiles and reads against a migrated database. The column drops
+-- land in a later, separate migration.
+--
+-- It does, however, DELETE ROWS (steps 4 and 6). An organisation holding more
+-- than one Membership row keeps only the winner, and one holding more than one
+-- projection row keeps only the row the others were unioned into. Under the old
+-- per-user resolution, contacts whose own row was deleted resolve to no
+-- membership and are denied access until the new code deploys. So this is safe
+-- to apply ahead of the contract migration, but not indefinitely — and it is
+-- only genuinely a no-op for organisations that already had exactly one row.
 --
 -- Steps marked [data] are hand-written; the DDL follows Prisma's generated
 -- shape and constraint naming. Prisma applies each migration file in a single

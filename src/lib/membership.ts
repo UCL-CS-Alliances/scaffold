@@ -3,14 +3,15 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 /**
  * Membership belongs to the organisation, not to the individual: a partner buys
- * a tier and its contacts occupy seats on it. The schema still hangs Membership
- * off a user, so this module is the one place that bridges the two — every read
- * resolves *user -> organisation -> the organisation's membership*, which is
- * the behaviour the rest of the app should depend on.
+ * a tier and its contacts occupy seats on it. Membership is one row per
+ * organisation and has no userId, so a contact's membership is whatever their
+ * organisationId points at. This module owns that resolution — read tier,
+ * expiry, status or manager through it rather than querying prisma.membership
+ * at a call site, so the rule stays in one place.
  *
- * The returned shape is hand-written rather than a Prisma model type, and that
- * is the point: when Membership is re-keyed to one row per organisation, only
- * the queries in this file change and no call site has to move.
+ * The returned shape is hand-written rather than a Prisma model type. That kept
+ * the schema move from rippling into call sites while it was underway, and it
+ * still insulates them from the next one.
  *
  * Callers inside an interactive $transaction must pass their tx — on the pooled
  * production connection (connection_limit=1) a query issued on the global
