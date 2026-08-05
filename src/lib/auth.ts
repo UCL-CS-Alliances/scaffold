@@ -5,6 +5,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { recordAuditLog } from "@/lib/audit-log";
+import { getMembershipForUser } from "@/lib/membership";
 
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
@@ -32,12 +33,6 @@ const email = credentials.email.trim().toLowerCase();
             roles: {
               include: { role: true },
             },
-            memberships: {
-              where: { isActive: true },
-              include: {
-                membershipTier: true,
-              },
-            },
           },
         });
 
@@ -56,22 +51,13 @@ const email = credentials.email.trim().toLowerCase();
 
         const roleKeys = user.roles.map((ur) => ur.role.key);
 
-        // Choose "highest" membership tier by rank if multiple
-        const activeMemberships = user.memberships.filter((m) => m.isActive);
-        let membershipTierKey: string | null = null;
-        let membershipTierRank: number | null = null;
-
-        if (activeMemberships.length > 0) {
-          const highest = activeMemberships.reduce((best, current) => {
-            if (!best) return current;
-            return current.membershipTier.rank > best.membershipTier.rank
-              ? current
-              : best;
-          }, activeMemberships[0]);
-
-          membershipTierKey = highest.membershipTier.key;
-          membershipTierRank = highest.membershipTier.rank;
-        }
+        // The tier is the organisation's, not this contact's. Resolved after
+        // the password check so failed sign-ins don't pay for the round-trip.
+        //
+        // Note this claim is baked into the JWT and never refreshed, so it goes
+        // stale when an organisation's tier changes. It is display-only:
+        // userCanAccessApp and the talent-discovery gates read the database.
+        const membership = await getMembershipForUser(prisma, user.id);
 
         // This object is what flows into the jwt callback as `user`
         return {
@@ -79,8 +65,8 @@ const email = credentials.email.trim().toLowerCase();
           email: user.email,
           name: `${user.firstName} ${user.lastName}`,
           roleKeys,
-          membershipTierKey,
-          membershipTierRank,
+          membershipTierKey: membership?.tierKey ?? null,
+          membershipTierRank: membership?.tierRank ?? null,
         };
       },
     }),

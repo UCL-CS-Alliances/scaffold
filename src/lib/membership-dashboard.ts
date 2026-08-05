@@ -1,5 +1,9 @@
 // src/lib/membership-dashboard.ts
 import { prisma } from "@/lib/prisma";
+import {
+  getMembershipForOrganisation,
+  getRedeemedBenefitCodesForOrganisation,
+} from "@/lib/membership";
 
 export type AdminTierSummary = {
   id: number;
@@ -10,7 +14,9 @@ export type AdminTierSummary = {
 };
 
 export type AdminDashboardSummary = {
-  totalMembers: number;
+  // Member *organisations*, not contacts: a partner with three people on the
+  // platform is one member of the programme.
+  totalMemberOrganisations: number;
   tiers: AdminTierSummary[];
 };
 
@@ -34,39 +40,50 @@ export async function getAdminDashboardSummary(): Promise<AdminDashboardSummary>
     where: { key: "MEMBER" },
   });
 
-  const tiers = await prisma.membershipTier.findMany({
-    orderBy: { rank: "asc" },
-    include: {
-      memberships: {
-        where: {
-          isActive: true,
-          user: memberRole
-            ? {
-                roles: {
-                  some: { roleId: memberRole.id },
-                },
-              }
-            : undefined,
-        },
+  const [tiers, memberships] = await Promise.all([
+    prisma.membershipTier.findMany({
+      orderBy: { rank: "asc" },
+      select: { id: true, key: true, label: true, rank: true },
+    }),
+    // Qualified by the organisation having at least one MEMBER contact.
+    // Filtering through the membership's own user is no longer possible, and
+    // was wrong anyway: after the collapse that column held whichever contact
+    // happened to win, so an organisation could drop out of every total purely
+    // because that person lacked the MEMBER role.
+    prisma.membership.findMany({
+      where: {
+        isActive: true,
+        organisation: memberRole
+          ? { users: { some: { roles: { some: { roleId: memberRole.id } } } } }
+          : undefined,
       },
-    },
-  });
+      select: {
+        organisationId: true,
+        membershipTierId: true,
+      },
+    }),
+  ]);
+
+  // One membership row per organisation now, so the row count is the
+  // organisation count and no per-organisation deduplication is needed.
+  const countByTierId = new Map<number, number>();
+  for (const m of memberships) {
+    countByTierId.set(
+      m.membershipTierId,
+      (countByTierId.get(m.membershipTierId) ?? 0) + 1,
+    );
+  }
 
   const tierSummaries: AdminTierSummary[] = tiers.map((tier) => ({
     id: tier.id,
     key: tier.key,
     label: tier.label,
     rank: tier.rank,
-    count: tier.memberships.length,
+    count: countByTierId.get(tier.id) ?? 0,
   }));
 
-  const totalMembers = tierSummaries.reduce(
-    (sum, t) => sum + t.count,
-    0,
-  );
-
   return {
-    totalMembers,
+    totalMemberOrganisations: memberships.length,
     tiers: tierSummaries,
   };
 }
@@ -76,37 +93,32 @@ export async function getMemberDashboardData(
 ): Promise<MemberDashboardData | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: {
-      organisation: true,
-      memberships: {
-        where: { isActive: true },
-        include: { membershipTier: true },
-      },
-      membershipDashboardMember: true,
+    select: {
+      firstName: true,
+      organisationId: true,
+      organisation: { select: { name: true } },
     },
   });
 
   if (!user) return null;
 
-  const membership = user.memberships.at(0) ?? null;
-
-  const tierLabel = membership?.membershipTier.label ?? "Unknown tier";
-  const tierKey = membership?.membershipTier.key ?? null;
-  const tierRank = membership?.membershipTier.rank ?? null;
-  const expiry = membership?.expiry ?? null;
-  const managerName = membership?.managerName ?? null;
-
-  const redeemedBenefitCodes =
-    user.membershipDashboardMember?.redeemedBenefitCodes ?? [];
+  // Tier and redemption both belong to the organisation, so every contact at
+  // one partner sees the same dashboard.
+  const [membership, redeemedBenefitCodes] = user.organisationId
+    ? await Promise.all([
+        getMembershipForOrganisation(prisma, user.organisationId),
+        getRedeemedBenefitCodesForOrganisation(prisma, user.organisationId),
+      ])
+    : [null, [] as string[]];
 
   return {
     firstName: user.firstName,
     organisationName: user.organisation?.name ?? null,
-    membershipTierLabel: tierLabel,
-    membershipTierKey: tierKey,
-    membershipTierRank: tierRank,
-    membershipExpiry: expiry,
-    membershipManagerName: managerName,
+    membershipTierLabel: membership?.tierLabel ?? "Unknown tier",
+    membershipTierKey: membership?.tierKey ?? null,
+    membershipTierRank: membership?.tierRank ?? null,
+    membershipExpiry: membership?.expiry ?? null,
+    membershipManagerName: membership?.managerName ?? null,
     redeemedBenefitCodes,
   };
 }

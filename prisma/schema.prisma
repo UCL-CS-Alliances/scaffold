@@ -18,39 +18,50 @@ datasource db {
 // -----------------------------
 
 model User {
-  id           String @id @default(cuid())
-  email        String @unique
+  id           String  @id @default(cuid())
+  email        String  @unique
   passwordHash String
   firstName    String
   lastName     String
+  jobTitle     String?
 
   organisation   Organisation? @relation(fields: [organisationId], references: [id])
   organisationId Int?
 
+  // Who speaks for the organisation. At most one per organisation, enforced by
+  // a partial unique index that Prisma cannot express — it lives in
+  // hand-written migration SQL, and update-user demotes the incumbent on save.
+  isPrimaryContact Boolean @default(false)
+
   defaultApp   App? @relation("UserDefaultApp", fields: [defaultAppId], references: [id])
   defaultAppId Int?
 
-  roles       UserRole[]
-  memberships Membership[]
+  roles UserRole[]
+
+  // No memberships relation: a user's membership is their organisation's.
 
   // Auth models
   accounts Account[]
   sessions Session[]
 
-  // App-specific projections (1–1)
-  membershipDashboardMember MembershipDashboardMember? @relation("UserDashboardMember")
-
   // Audit log relation (actor)
   auditLogs AuditLog[] @relation("AuditActor")
+
+  @@index([organisationId])
 }
 
 model Organisation {
-  id          Int              @id @default(autoincrement())
-  name        String
-  slug        String           @unique
-  type        OrganisationType
-  users       User[]
-  memberships Membership[]
+  id    Int              @id @default(autoincrement())
+  name  String
+  slug  String           @unique
+  type  OrganisationType
+  users User[]
+
+  // One membership per organisation: the partner buys the tier and its
+  // contacts occupy seats on it. Benefit redemption is likewise the
+  // organisation's — a free workshop is consumed once, not once per contact.
+  membership      Membership?
+  dashboardMember MembershipDashboardMember?
 }
 
 enum OrganisationType {
@@ -92,12 +103,10 @@ model MembershipTier {
 }
 
 model Membership {
-  id     Int    @id @default(autoincrement())
-  user   User   @relation(fields: [userId], references: [id])
-  userId String
+  id Int @id @default(autoincrement())
 
   organisation   Organisation @relation(fields: [organisationId], references: [id])
-  organisationId Int
+  organisationId Int          @unique
 
   membershipTier   MembershipTier @relation(fields: [membershipTierId], references: [id])
   membershipTierId Int
@@ -109,11 +118,7 @@ model Membership {
   managerName String?
   expiry      DateTime?
 
-  // 1–1 relation to dashboard projection
-  dashboardEntry MembershipDashboardMember? @relation("MembershipDashboardEntry")
-
-  @@index([userId])
-  @@index([organisationId])
+  // No @@index([organisationId]) — the unique index above already covers it.
   @@index([membershipTierId])
 }
 
@@ -160,20 +165,17 @@ enum AppAccessType {
 model MembershipDashboardMember {
   id Int @id @default(autoincrement())
 
-  // Link back to canonical data (optional, but at most one each)
-  user   User?   @relation("UserDashboardMember", fields: [userId], references: [id])
-  userId String? @unique
+  // The organisation owns the redemption state. There is deliberately no link
+  // to a user or to Membership: organisationId already determines the
+  // membership 1–1, so a membershipId could only drift out of step with it.
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  organisationId Int          @unique
 
-  membership   Membership? @relation("MembershipDashboardEntry", fields: [membershipId], references: [id])
-  membershipId Int?        @unique
-
-  // YAML id for easy mapping
+  // YAML id for easy mapping; equal to Organisation.slug
   memberKey String @unique // e.g. "chanel", "microsoft"
 
   // App-specific fields only
   redeemedBenefitCodes String[] // ["B03", "B08", ...]
-
-  @@index([membershipId])
 }
 
 // AUTH MODELS (NextAuth-style)

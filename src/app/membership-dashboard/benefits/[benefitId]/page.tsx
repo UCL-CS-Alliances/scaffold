@@ -1,10 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import {
-  BENEFITS,
-  MEMBERSHIP_TIER_RANK,
-  MembershipTierKey,
-} from "@/content/benefits";
+import { BENEFITS } from "@/content/benefits";
+import { hasBenefitAccess, resolveMemberRank } from "@/lib/benefit-access";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { getMemberDashboardData } from "@/lib/membership-dashboard";
 import SecondaryNav from "@/components/membership-dashboard/SecondaryNav";
@@ -19,14 +16,6 @@ function determineStatus(hasAccess: boolean, isRedeemed: boolean): BenefitStatus
   if (!hasAccess) return "NO_ACCESS";
   if (isRedeemed) return "REDEEMED";
   return "HAS_ACCESS";
-}
-
-function normaliseTierKey(key: string | null): MembershipTierKey | null {
-  if (!key) return null;
-  const lower = key.toLowerCase() as MembershipTierKey;
-  return ["bronze", "silver", "gold", "platinum"].includes(lower)
-    ? lower
-    : null;
 }
 
 function getStatusMeta(status: BenefitStatus) {
@@ -72,14 +61,12 @@ export default async function BenefitPage({ params }: PageProps) {
 
     const memberData = await getMemberDashboardData(userId);
     if (memberData) {
-      const tierKey = normaliseTierKey(memberData.membershipTierKey);
-      const myRank =
-        memberData.membershipTierRank ??
-        (tierKey ? MEMBERSHIP_TIER_RANK[tierKey] : null);
+      const myRank = resolveMemberRank(
+        memberData.membershipTierRank,
+        memberData.membershipTierKey,
+      );
 
-      const neededRank = MEMBERSHIP_TIER_RANK[benefit.tierMin];
-
-      if (myRank !== null && myRank >= neededRank) hasAccess = true;
+      hasAccess = hasBenefitAccess(myRank, benefit.tierMin);
       isRedeemed = memberData.redeemedBenefitCodes.includes(id);
     }
   }

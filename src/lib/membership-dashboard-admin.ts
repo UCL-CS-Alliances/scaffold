@@ -1,12 +1,20 @@
 // src/lib/membership-dashboard-admin.ts
 import { prisma } from "@/lib/prisma";
-import { getServerAuthSession } from "@/lib/getServerAuthSession";
-import { BENEFITS, MEMBERSHIP_TIER_RANK, type BenefitId, type MembershipTierKey } from "@/content/benefits";
+import { BENEFITS, type BenefitId } from "@/content/benefits";
+import { hasBenefitAccess } from "@/lib/benefit-access";
+import {
+  getMembershipForOrganisation,
+  getRedeemedBenefitCodesForOrganisation,
+} from "@/lib/membership";
 
 export type AdminMemberListItem = {
   userId: string;
+  // Grouping keys on the id, not the name: Organisation.name is not unique.
+  organisationId: number;
   organisationName: string;
   contactName: string;
+  jobTitle: string | null;
+  isPrimaryContact: boolean;
   tierLabel: string;
   tierRank: number;
   tierKey: string;
@@ -16,8 +24,11 @@ export type AdminMemberListItem = {
 
 export type AdminSelectedMember = {
   userId: string;
+  organisationId: number | null;
   organisationName: string | null;
   contactName: string;
+  jobTitle: string | null;
+  isPrimaryContact: boolean;
   membershipTierLabel: string;
   membershipTierKey: string | null;
   membershipTierRank: number | null;
@@ -32,13 +43,6 @@ export type AdminSelectedMember = {
   redeemedBenefitCodes: BenefitId[];
 };
 
-function requireAdmin(roleKeys: unknown): asserts roleKeys is string[] {
-  const keys = Array.isArray(roleKeys) ? roleKeys : [];
-  if (!keys.includes("ADMIN")) {
-    throw new Error("Admin access required.");
-  }
-}
-
 // Sign-ins are moments rather than dates, so the label carries a time — same
 // en-GB style as the admin client's formatDateTimeGB.
 function formatLastSignInLabel(d: Date | null | undefined): string {
@@ -52,50 +56,91 @@ function formatLastSignInLabel(d: Date | null | undefined): string {
 export async function getAdminMemberList(): Promise<AdminMemberListItem[]> {
   const memberRole = await prisma.role.findUnique({ where: { key: "MEMBER" } });
 
-  const memberships = await prisma.membership.findMany({
+  // Driven by users rather than by membership rows: an organisation holds one
+  // membership but can have several contacts, and this list has a row per
+  // contact. Driving it off Membership would drop colleagues who share their
+  // organisation's membership rather than holding one of their own.
+  const users = await prisma.user.findMany({
     where: {
-      isActive: true,
-      user: memberRole
-        ? { roles: { some: { roleId: memberRole.id } } }
-        : undefined,
+      organisationId: { not: null },
+      ...(memberRole ? { roles: { some: { roleId: memberRole.id } } } : {}),
     },
-    include: {
-      membershipTier: true,
-      organisation: true,
-      user: true,
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      jobTitle: true,
+      isPrimaryContact: true,
+      organisationId: true,
+      organisation: { select: { name: true } },
     },
     orderBy: [
-      { membershipTier: { rank: "desc" } }, // Platinum -> Bronze
       { organisation: { name: "asc" } },
+      // The organisation's primary contact heads its group.
+      { isPrimaryContact: "desc" },
+      { lastName: "asc" },
+      { firstName: "asc" },
     ],
   });
 
+  if (!users.length) return [];
+
+  const organisationIds = [
+    ...new Set(
+      users
+        .map((u) => u.organisationId)
+        .filter((id): id is number => id != null),
+    ),
+  ];
+
+  const memberships = await prisma.membership.findMany({
+    where: { organisationId: { in: organisationIds }, isActive: true },
+    include: { membershipTier: true },
+  });
+
+  // One row per organisation, so this is a straight lookup.
+  const membershipByOrganisation = new Map(
+    memberships.map((m) => [m.organisationId, m]),
+  );
+
   // One grouped query for all members' latest LOGIN rows — not one per member.
-  const userIds = memberships.map((m) => m.userId);
-  const latestLogins = userIds.length
-    ? await prisma.auditLog.groupBy({
-        by: ["entityId"],
-        where: {
-          entityType: "User",
-          entityId: { in: userIds },
-          action: "LOGIN",
-        },
-        _max: { timestamp: true },
-      })
-    : [];
+  const userIds = users.map((u) => u.id);
+  const latestLogins = await prisma.auditLog.groupBy({
+    by: ["entityId"],
+    where: {
+      entityType: "User",
+      entityId: { in: userIds },
+      action: "LOGIN",
+    },
+    _max: { timestamp: true },
+  });
   const lastSignInByUserId = new Map(
     latestLogins.map((g) => [g.entityId, g._max.timestamp]),
   );
 
-  return memberships.map((m) => ({
-    userId: m.userId,
-    organisationName: m.organisation.name,
-    contactName: `${m.user.firstName} ${m.user.lastName}`,
-    tierLabel: m.membershipTier.label,
-    tierRank: m.membershipTier.rank,
-    tierKey: m.membershipTier.key,
-    lastSignedInLabel: formatLastSignInLabel(lastSignInByUserId.get(m.userId)),
-  }));
+  // Contacts whose organisation holds no active membership are dropped, which
+  // preserves the membership-driven semantics this list had before.
+  return users.flatMap((u) => {
+    if (u.organisationId == null) return [];
+
+    const membership = membershipByOrganisation.get(u.organisationId);
+    if (!membership) return [];
+
+    return [
+      {
+        userId: u.id,
+        organisationId: u.organisationId,
+        organisationName: u.organisation?.name ?? "Unknown organisation",
+        contactName: `${u.firstName} ${u.lastName}`,
+        jobTitle: u.jobTitle,
+        isPrimaryContact: u.isPrimaryContact,
+        tierLabel: membership.membershipTier.label,
+        tierRank: membership.membershipTier.rank,
+        tierKey: membership.membershipTier.key,
+        lastSignedInLabel: formatLastSignInLabel(lastSignInByUserId.get(u.id)),
+      },
+    ];
+  });
 }
 
 export async function getAdminSelectedMember(userId: string): Promise<AdminSelectedMember | null> {
@@ -105,33 +150,35 @@ export async function getAdminSelectedMember(userId: string): Promise<AdminSelec
       organisation: true,
       defaultApp: true,
       roles: { include: { role: true } },
-      memberships: {
-        where: { isActive: true },
-        include: { membershipTier: true, organisation: true },
-      },
-      membershipDashboardMember: true,
     },
   });
 
   if (!user) return null;
 
-  const membership = user.memberships.at(0) ?? null;
-  const tierLabel = membership?.membershipTier.label ?? "Unknown tier";
-  const tierKey = membership?.membershipTier.key ?? null;
-  const tierRank = membership?.membershipTier.rank ?? null;
+  // Tier and redemption are the organisation's, so both contacts at a partner
+  // show identical membership details and benefit state.
+  const [membership, redeemedCodes] = user.organisationId
+    ? await Promise.all([
+        getMembershipForOrganisation(prisma, user.organisationId),
+        getRedeemedBenefitCodesForOrganisation(prisma, user.organisationId),
+      ])
+    : [null, [] as string[]];
 
-  const redeemed = (user.membershipDashboardMember?.redeemedBenefitCodes ?? []) as BenefitId[];
+  const redeemed = redeemedCodes as BenefitId[];
 
   return {
     userId: user.id,
-    organisationName: user.organisation?.name ?? membership?.organisation.name ?? null,
+    organisationName: user.organisation?.name ?? membership?.organisationName ?? null,
     contactName: `${user.firstName} ${user.lastName}`,
-    membershipTierLabel: tierLabel,
-    membershipTierKey: tierKey,
-    membershipTierRank: tierRank,
+    jobTitle: user.jobTitle,
+    isPrimaryContact: user.isPrimaryContact,
+    membershipTierLabel: membership?.tierLabel ?? "Unknown tier",
+    membershipTierKey: membership?.tierKey ?? null,
+    membershipTierRank: membership?.tierRank ?? null,
     membershipExpiry: membership?.expiry ?? null,
     membershipManagerName: membership?.managerName ?? null,
     membershipStatus: membership?.status ?? null,
+    organisationId: user.organisationId,
 
     roleKeys: user.roles.map((ur) => ur.role.key),
     defaultAppKey: user.defaultApp?.key ?? null,
@@ -161,10 +208,13 @@ function asStringArray(v: unknown): string[] {
 }
 
 export async function getAdminBenefitAuditTrail(
-  userId: string,
+  organisationId: number,
 ): Promise<AdminBenefitAuditEntry[]> {
   const rows = await prisma.auditLog.findMany({
-    where: { entityType: "MembershipDashboardMember", entityId: userId },
+    where: {
+      entityType: "OrganisationBenefitRedemption",
+      entityId: String(organisationId),
+    },
     orderBy: { timestamp: "desc" },
     take: 20,
     include: { actor: true },
@@ -190,12 +240,6 @@ export async function getAdminBenefitAuditTrail(
   });
 }
 
-// Helper for eligibility in UI (based on selected member rank)
-export function canAccessBenefit(memberRank: number | null, tierMin: MembershipTierKey) {
-  if (memberRank == null) return false;
-  return memberRank >= MEMBERSHIP_TIER_RANK[tierMin];
-}
-
 export type AdminBenefitRedemptionStat = {
   benefitId: BenefitId;
   eligible: number;
@@ -207,37 +251,60 @@ export async function getAdminBenefitRedemptionStats(): Promise<AdminBenefitRede
   // Fetch the active MEMBER role id (consistent with your other admin summary logic)
   const memberRole = await prisma.role.findUnique({ where: { key: "MEMBER" } });
 
-  // Pull all active memberships for MEMBER users, including tier rank and redeemed codes
-  const rows = await prisma.membership.findMany({
+  // The unit here is the organisation, not the contact: eligibility and
+  // redemption both belong to the partner, so a company with three people is
+  // one eligible member and redeems a given benefit once.
+  // Qualified by the organisation having at least one MEMBER contact — see the
+  // matching note in getAdminDashboardSummary. One row per organisation, so no
+  // deduplication is needed.
+  const memberships = await prisma.membership.findMany({
     where: {
       isActive: true,
-      user: memberRole
-        ? { roles: { some: { roleId: memberRole.id } } }
+      organisation: memberRole
+        ? { users: { some: { roles: { some: { roleId: memberRole.id } } } } }
         : undefined,
     },
     select: {
-      userId: true,
+      organisationId: true,
       membershipTier: { select: { rank: true } },
-      user: {
-        select: {
-          membershipDashboardMember: { select: { redeemedBenefitCodes: true } },
-        },
-      },
     },
   });
 
-  // Normalise into a simple array per member (1 user per org for now)
-  const members = rows.map((r) => ({
-    userId: r.userId,
-    tierRank: r.membershipTier.rank,
-    redeemed: new Set((r.user.membershipDashboardMember?.redeemedBenefitCodes ?? []) as BenefitId[]),
-  }));
+  const rankByOrganisation = new Map<number, number>(
+    memberships.map((m) => [m.organisationId, m.membershipTier.rank]),
+  );
+
+  if (!rankByOrganisation.size) {
+    return BENEFITS.map((b) => ({
+      benefitId: b.id,
+      eligible: 0,
+      redeemed: 0,
+      percent: null,
+    }));
+  }
+
+  const projections = await prisma.membershipDashboardMember.findMany({
+    where: { organisationId: { in: [...rankByOrganisation.keys()] } },
+    select: { organisationId: true, redeemedBenefitCodes: true },
+  });
+
+  const redeemedByOrganisation = new Map<number, Set<string>>(
+    projections.map((p) => [p.organisationId, new Set(p.redeemedBenefitCodes)]),
+  );
+
+  const organisations = [...rankByOrganisation.entries()].map(
+    ([organisationId, tierRank]) => ({
+      tierRank,
+      redeemed: redeemedByOrganisation.get(organisationId) ?? new Set<string>(),
+    }),
+  );
 
   return BENEFITS.map((b) => {
-    const minRank = MEMBERSHIP_TIER_RANK[b.tierMin];
-    const eligibleMembers = members.filter((m) => m.tierRank >= minRank);
-    const eligible = eligibleMembers.length;
-    const redeemed = eligibleMembers.filter((m) => m.redeemed.has(b.id)).length;
+    const eligibleOrganisations = organisations.filter((o) =>
+      hasBenefitAccess(o.tierRank, b.tierMin),
+    );
+    const eligible = eligibleOrganisations.length;
+    const redeemed = eligibleOrganisations.filter((o) => o.redeemed.has(b.id)).length;
     const percent = eligible === 0 ? null : Math.round((redeemed / eligible) * 100);
 
     return { benefitId: b.id, eligible, redeemed, percent };

@@ -12,7 +12,7 @@ import type {
   AdminSelectedMember,
 } from "@/lib/membership-dashboard-admin";
 import type { HandbookRenderResult } from "@/lib/handbook";
-import { canAccessBenefit } from "@/lib/membership-dashboard-admin";
+import { hasBenefitAccess } from "@/lib/benefit-access";
 import { saveRedeemedBenefitsAction } from "@/lib/membership-dashboard-actions";
 
 type TabKey = "members" | "benefits" | "handbook";
@@ -139,13 +139,81 @@ export default function AdminDashboardClient(props: {
     });
   }
 
-  const tierGroups = useMemo(() => {
-    const map = new Map<string, AdminMemberListItem[]>();
+  // Both groupings key on organisationId and never on the name:
+  // Organisation.name has no unique constraint and the admin "Add organisation"
+  // modal can create duplicates, so grouping by name would silently merge two
+  // distinct legal entities into one row.
+  //
+  // Ordering is applied explicitly here rather than inherited from
+  // getAdminMemberList's orderBy via Map insertion order, so a later change to
+  // that query cannot silently reorder the UI.
+  const selectorGroups = useMemo(() => {
+    const byOrg = new Map<
+      number,
+      { organisationId: number; organisationName: string; items: AdminMemberListItem[] }
+    >();
+
     for (const m of members) {
-      const key = m.tierLabel;
-      map.set(key, [...(map.get(key) ?? []), m]);
+      const group = byOrg.get(m.organisationId);
+      if (group) group.items.push(m);
+      else
+        byOrg.set(m.organisationId, {
+          organisationId: m.organisationId,
+          organisationName: m.organisationName,
+          items: [m],
+        });
     }
-    return [...map.entries()];
+
+    return [...byOrg.values()]
+      .sort((a, b) => a.organisationName.localeCompare(b.organisationName))
+      .map((group) => ({
+        ...group,
+        items: [...group.items].sort((a, b) => a.contactName.localeCompare(b.contactName)),
+      }));
+  }, [members]);
+
+  const tierGroups = useMemo(() => {
+    const byTier = new Map<
+      string,
+      {
+        tierLabel: string;
+        tierRank: number;
+        orgs: Map<
+          number,
+          { organisationId: number; organisationName: string; items: AdminMemberListItem[] }
+        >;
+      }
+    >();
+
+    for (const m of members) {
+      let tier = byTier.get(m.tierKey);
+      if (!tier) {
+        tier = { tierLabel: m.tierLabel, tierRank: m.tierRank, orgs: new Map() };
+        byTier.set(m.tierKey, tier);
+      }
+
+      const org = tier.orgs.get(m.organisationId);
+      if (org) org.items.push(m);
+      else
+        tier.orgs.set(m.organisationId, {
+          organisationId: m.organisationId,
+          organisationName: m.organisationName,
+          items: [m],
+        });
+    }
+
+    return [...byTier.values()]
+      .sort((a, b) => b.tierRank - a.tierRank) // Platinum -> Bronze
+      .map((tier) => ({
+        tierLabel: tier.tierLabel,
+        organisationCount: tier.orgs.size,
+        orgs: [...tier.orgs.values()]
+          .sort((a, b) => a.organisationName.localeCompare(b.organisationName))
+          .map((org) => ({
+            ...org,
+            items: [...org.items].sort((a, b) => a.contactName.localeCompare(b.contactName)),
+          })),
+      }));
   }, [members]);
 
   const benefitStatsMap = useMemo(() => {
@@ -165,12 +233,14 @@ export default function AdminDashboardClient(props: {
   }, [selectedUserId, selectedMember]);
 
   async function saveBenefits() {
-    if (!selectedUserId) return;
+    const organisationId = selectedMember?.organisationId;
+    if (organisationId == null) return;
+
     const redeemedBenefitCodes = Array.from(draftRedeemed);
 
     startTransition(async () => {
       await saveRedeemedBenefitsAction({
-        userId: selectedUserId,
+        organisationId,
         redeemedBenefitCodes,
       });
       router.refresh();
@@ -213,10 +283,14 @@ export default function AdminDashboardClient(props: {
             style={{ width: "min(28rem, 100%)" }}
           >
             <option value="">No account selected (summary view)</option>
-            {members.map((m) => (
-              <option key={m.userId} value={m.userId}>
-                {m.organisationName} ({m.contactName})
-              </option>
+            {selectorGroups.map((group) => (
+              <optgroup key={group.organisationId} label={group.organisationName}>
+                {group.items.map((m) => (
+                  <option key={m.userId} value={m.userId}>
+                    {m.contactName}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </div>
@@ -275,19 +349,34 @@ export default function AdminDashboardClient(props: {
               <>
                 <h3 style={{ marginTop: 0 }}>Members overview</h3>
 
-                {tierGroups.map(([tierLabel, items]) => (
-                  <details key={tierLabel} open>
+                {tierGroups.map((tier) => (
+                  <details key={tier.tierLabel} open>
                     <summary>
-                      <strong>{tierLabel}</strong> ({items.length})
+                      <strong>{tier.tierLabel}</strong> ({tier.organisationCount})
                     </summary>
 
                     <ul className="list-plain" style={{ marginTop: ".5rem" }}>
-                      {items.map((m) => (
-                        <li key={m.userId} style={{ marginBottom: ".35rem" }}>
-                          <span>
-                            <strong>{m.organisationName}</strong> ({m.contactName}) — Last sign-in:{" "}
-                            <span>{m.lastSignedInLabel}</span>
-                          </span>
+                      {tier.orgs.map((org) => (
+                        <li key={org.organisationId} style={{ marginBottom: ".5rem" }}>
+                          <strong>{org.organisationName}</strong>
+
+                          <ul
+                            className="list-plain"
+                            style={{ marginTop: ".25rem", marginLeft: "1rem" }}
+                          >
+                            {org.items.map((m) => (
+                              <li key={m.userId} style={{ marginBottom: ".35rem" }}>
+                                {m.contactName}
+                                {m.jobTitle?.trim() ? `, ${m.jobTitle}` : ""}
+                                {m.isPrimaryContact && (
+                                  <span className="pill" style={{ marginLeft: ".4rem" }}>
+                                    Primary contact
+                                  </span>
+                                )}{" "}
+                                — Last sign-in: <span>{m.lastSignedInLabel}</span>
+                              </li>
+                            ))}
+                          </ul>
                         </li>
                       ))}
                     </ul>
@@ -306,6 +395,11 @@ export default function AdminDashboardClient(props: {
                   <li>
                     <strong>Contact:</strong>{" "}
                     {selectedMember?.contactName ?? "Unknown"}
+                    {selectedMember?.isPrimaryContact ? " (primary contact)" : ""}
+                  </li>
+                  <li>
+                    <strong>Job title:</strong>{" "}
+                    {selectedMember?.jobTitle?.trim() ? selectedMember.jobTitle : "Not set"}
                   </li>
                   <li>
                     <strong>Membership tier:</strong>{" "}
@@ -403,9 +497,18 @@ export default function AdminDashboardClient(props: {
               <>
                 <h3 style={{ marginTop: 0 }}>Benefit redemption checklist</h3>
 
+                <p className="small" style={{ marginTop: ".25rem" }}>
+                  Benefits are recorded for{" "}
+                  <strong>
+                    {selectedMember?.organisationName ?? "the organisation"}
+                  </strong>{" "}
+                  as a whole, not for an individual contact. Every contact there
+                  sees the same redemption state.
+                </p>
+
                 <ul className="list-plain" style={{ marginTop: ".75rem" }}>
                   {BENEFITS.map((b) => {
-                    const included = canAccessBenefit(
+                    const included = hasBenefitAccess(
                       selectedMember?.membershipTierRank ?? null,
                       b.tierMin,
                     );

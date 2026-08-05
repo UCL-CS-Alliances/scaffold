@@ -28,6 +28,8 @@ type UserAuditSnapshot = {
   firstName: string;
   lastName: string;
   email: string;
+  jobTitle: string | null;
+  isPrimaryContact: boolean;
   defaultAppId: number | null;
   organisationId: number | null;
   roleKeys: string[];
@@ -51,18 +53,30 @@ async function getUserAuditSnapshot(
       firstName: true,
       lastName: true,
       email: true,
+      jobTitle: true,
+      isPrimaryContact: true,
       defaultAppId: true,
       organisationId: true,
       roles: { select: { role: { select: { key: true } } } },
-      memberships: {
-        where: { isActive: true },
+      // The organisation's membership, not the contact's. Reading it per
+      // contact recorded "no membership change" for anyone who did not
+      // personally hold the row — i.e. every second contact at a partner.
+      //
+      // Unfiltered by isActive on purpose: the snapshot captures isActive
+      // itself, so suspending now shows as a field change rather than as the
+      // membership disappearing.
+      organisation: {
         select: {
-          membershipTierId: true,
-          organisationId: true,
-          isActive: true,
-          status: true,
-          managerName: true,
-          expiry: true,
+          membership: {
+            select: {
+              membershipTierId: true,
+              organisationId: true,
+              isActive: true,
+              status: true,
+              managerName: true,
+              expiry: true,
+            },
+          },
         },
       },
     },
@@ -70,12 +84,14 @@ async function getUserAuditSnapshot(
 
   if (!user) return null;
 
-  const membership = user.memberships.at(0) ?? null;
+  const membership = user.organisation?.membership ?? null;
 
   return {
     firstName: user.firstName,
     lastName: user.lastName,
     email: user.email,
+    jobTitle: user.jobTitle,
+    isPrimaryContact: user.isPrimaryContact,
     defaultAppId: user.defaultAppId,
     organisationId: user.organisationId,
     roleKeys: user.roles.map((r) => r.role.key).sort(),
@@ -96,10 +112,14 @@ async function getUserAuditSnapshot(
 function diffUserSnapshots(before: UserAuditSnapshot, after: UserAuditSnapshot) {
   const changes: Record<string, unknown> = {};
 
+  // Any new scalar on the snapshot must be listed here too, or it silently
+  // vanishes from the audit diff.
   const userFields = [
     "firstName",
     "lastName",
     "email",
+    "jobTitle",
+    "isPrimaryContact",
     "defaultAppId",
     "organisationId",
   ] as const;
@@ -154,6 +174,11 @@ export async function POST(req: Request) {
 
   // NEW: allow defaultAppId for all users (self-edit)
   const userDefaultAppId = parseNullableNumber(userInput.defaultAppId);
+
+  // Job titles change often and belong to the person, so this is self-editable
+  // rather than admin-only. Blank is stored as null, not "".
+  const jobTitleRaw = String(userInput.jobTitle ?? "").trim();
+  const jobTitle = jobTitleRaw || null;
 
   if (!firstName || !lastName || !email) {
     return NextResponse.json(
@@ -211,7 +236,7 @@ export async function POST(req: Request) {
             throw new Error("Organisation type is invalid.");
           }
 
-          const slug = await uniqueOrganisationSlug(name);
+          const slug = await uniqueOrganisationSlug(name, tx);
           const created = await tx.organisation.create({
             data: { name, slug, type },
             select: { id: true },
@@ -291,8 +316,14 @@ export async function POST(req: Request) {
         isAdminAfterSave = wasAdmin;
       }
 
+      // Whether this save moves the contact to a different organisation.
+      // Membership and primary-contact status are both organisation-wide, so
+      // several decisions below turn on it.
+      const organisationChanged =
+        isAdmin && resolvedOrganisationId !== (before?.organisationId ?? null);
+
       // 3) Update user record
-      const userUpdate: any = { firstName, lastName, email };
+      const userUpdate: any = { firstName, lastName, email, jobTitle };
 
       // NEW: Everyone can set their own default app
       userUpdate.defaultAppId = userDefaultAppId;
@@ -305,6 +336,41 @@ export async function POST(req: Request) {
         // otherwise userDefaultAppId already covers the common case.
         if (resolvedDefaultAppIdForAdmin !== undefined) {
           userUpdate.defaultAppId = resolvedDefaultAppIdForAdmin;
+        }
+
+        // At most one primary contact per organisation. The incumbent is
+        // demoted first: the partial unique index rejects a second true, and
+        // promoting someone should visibly displace whoever held it.
+        //
+        // Demoted against the *new* organisation, not the old one — moving a
+        // primary contact between organisations would otherwise carry the flag
+        // across and collide with the destination's existing primary. A contact
+        // with no organisation cannot be anyone's primary contact.
+        // Only touched when the caller actually sent the field, so a partial
+        // admin payload cannot silently demote an organisation's contact.
+        if (typeof admin?.isPrimaryContact === "boolean") {
+          const wantsPrimary =
+            admin.isPrimaryContact && resolvedOrganisationId != null;
+
+          if (wantsPrimary) {
+            await tx.user.updateMany({
+              where: {
+                organisationId: resolvedOrganisationId,
+                id: { not: targetUserId },
+                isPrimaryContact: true,
+              },
+              data: { isPrimaryContact: false },
+            });
+          }
+
+          userUpdate.isPrimaryContact = wantsPrimary;
+        } else if (organisationChanged) {
+          // The field was omitted but the contact is moving. Left alone they
+          // would carry primary status into the destination, where the partial
+          // unique index rejects it and fails the whole transaction with a raw
+          // Prisma error. Primary status is per organisation, so a move clears
+          // it: the destination's admin re-assigns deliberately.
+          userUpdate.isPrimaryContact = false;
         }
       }
 
@@ -329,8 +395,21 @@ export async function POST(req: Request) {
         }
       }
 
-      // 5) Update single membership (admin only, only if tier is set)
-      if (isAdmin && admin?.membership && resolvedMembershipTierId) {
+      // 5) Update the organisation's membership (admin only, only if tier is set)
+      //
+      // Skipped entirely when this save moves the contact to a different
+      // organisation. The membership fields in the payload were loaded from the
+      // contact's *old* organisation, and the upsert below keys on the new one —
+      // so writing them would overwrite the destination's tier, status, manager
+      // and expiry with the origin's, for every contact there at once, while
+      // leaving the origin untouched. A contact who moves simply inherits the
+      // destination's membership; changing it is a separate, deliberate edit.
+      if (
+        isAdmin &&
+        admin?.membership &&
+        resolvedMembershipTierId &&
+        !organisationChanged
+      ) {
         const expiry = parseUkDateOrNull(admin.membership.expiryText);
 
         // membership requires an organisation
@@ -343,40 +422,32 @@ export async function POST(req: Request) {
           throw new Error("To assign a membership tier, the user must have an organisation set.");
         }
 
-        const existingMembership = await tx.membership.findFirst({
-          where: { userId: targetUserId, isActive: true },
-          select: { id: true },
+        const membershipFields = {
+          membershipTierId: resolvedMembershipTierId,
+          isActive: Boolean(admin.membership.isActive),
+          status: String(admin.membership.status ?? "active"),
+          managerName: admin.membership.managerName
+            ? String(admin.membership.managerName)
+            : null,
+          expiry,
+        };
+
+        // Keyed on the organisation, so editing any contact edits the one
+        // membership their organisation holds.
+        //
+        // This previously looked the row up per contact and fell through to a
+        // create when it found none, which broke in two ways: saving a second
+        // contact's profile violated the unique organisationId, and
+        // reactivating a suspended member (whose own row the isActive filter
+        // hid) silently created a duplicate.
+        await tx.membership.upsert({
+          where: { organisationId: targetUser.organisationId },
+          create: {
+            organisationId: targetUser.organisationId,
+            ...membershipFields,
+          },
+          update: membershipFields,
         });
-
-        const status = String(admin.membership.status ?? "active");
-        const managerName = admin.membership.managerName ? String(admin.membership.managerName) : null;
-        const isActive = Boolean(admin.membership.isActive);
-
-        if (existingMembership) {
-          await tx.membership.update({
-            where: { id: existingMembership.id },
-            data: {
-              organisationId: targetUser.organisationId,
-              membershipTierId: resolvedMembershipTierId,
-              isActive,
-              status,
-              managerName,
-              expiry,
-            },
-          });
-        } else {
-          await tx.membership.create({
-            data: {
-              userId: targetUserId,
-              organisationId: targetUser.organisationId,
-              membershipTierId: resolvedMembershipTierId,
-              isActive,
-              status,
-              managerName,
-              expiry,
-            },
-          });
-        }
       }
 
       // 6) Audit record: one row per save, skipped when nothing changed.

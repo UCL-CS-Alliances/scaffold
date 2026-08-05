@@ -2,6 +2,8 @@
 import { redirect } from "next/navigation";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { userCanAccessApp } from "@/lib/access-control";
+import { prisma } from "@/lib/prisma";
+import { getMembershipForUser } from "@/lib/membership";
 import SignInForm from "@/components/SignInForm";
 import { pageCopy } from "@/content/pageCopy";
 
@@ -60,7 +62,6 @@ export default async function TalentDiscoveryPage(
   const user = session.user as any;
   const userId = user.id as string;
   const roleKeys = (user.roleKeys ?? []) as string[];
-  const membershipTierRank = (user.membershipTierRank ?? null) as number | null;
 
   const hasStudentRole = roleKeys.includes("STUDENT");
   const hasAdminRole = roleKeys.includes("ADMIN");
@@ -103,6 +104,14 @@ export default async function TalentDiscoveryPage(
       );
     }
   }
+
+  // Resolved from the database rather than the session claim: the JWT bakes the
+  // tier at sign-in and never refreshes it, so a change to the organisation's
+  // tier would not reach a signed-in contact until they signed out and back in.
+  // Admins bypass every tier gate below, so they don't need it.
+  const membershipTierRank = hasAdminRole
+    ? null
+    : (await getMembershipForUser(prisma, userId))?.tierRank ?? null;
 
   // ─────────────────────────────────────────
   // 5) CV Library entry: requires Gold+ tier

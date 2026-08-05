@@ -70,9 +70,14 @@ export async function POST(req: Request) {
         });
       }
 
-      // Delete dependents first (prevents FK constraint failures)
+      // The organisation's membership and redemption history deliberately
+      // survive the contact: an organisation is a member independently of which
+      // of its people hold logins, and destroying its redemption record because
+      // someone left would be data loss. Neither table references the user any
+      // more, so there is nothing to reassign or clean up.
+      //
+      // UserRole is ON DELETE RESTRICT, so it must still go first.
       await tx.userRole.deleteMany({ where: { userId: targetUserId } });
-      await tx.membership.deleteMany({ where: { userId: targetUserId } });
 
       // Finally delete the user record
       await tx.user.delete({ where: { id: targetUserId } });
@@ -80,6 +85,15 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true }, { status: 200 });
   } catch (e: any) {
+    // The target is already gone — most often a confirm dialogue submitted
+    // twice. Prisma's raw P2025 text is not something to show an admin.
+    if (e?.code === "P2025") {
+      return NextResponse.json(
+        { ok: false, error: "This user no longer exists." },
+        { status: 400 },
+      );
+    }
+
     // Prisma constraint errors often surface here; return a helpful message.
     const msg =
       typeof e?.message === "string" && e.message

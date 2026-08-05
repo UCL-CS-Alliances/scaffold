@@ -14,7 +14,7 @@ function requireAdmin(roleKeys: unknown) {
 }
 
 export async function saveRedeemedBenefitsAction(input: {
-  userId: string;
+  organisationId: number;
   redeemedBenefitCodes: BenefitId[];
 }) {
   const session = await getServerAuthSession();
@@ -32,18 +32,20 @@ export async function saveRedeemedBenefitsAction(input: {
     if (!allowed.has(code)) throw new Error(`Unknown benefit code: ${code}`);
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: input.userId },
-    include: {
-      organisation: true,
-      memberships: { where: { isActive: true } },
-      membershipDashboardMember: true,
-    },
+  const organisationId = input.organisationId;
+
+  const organisation = await prisma.organisation.findUnique({
+    where: { id: organisationId },
+    select: { slug: true },
   });
 
-  if (!user) throw new Error("User not found.");
+  if (!organisation) throw new Error("Organisation not found.");
 
-  const existing = user.membershipDashboardMember;
+  // Redemption is the organisation's: a save made by one contact updates the
+  // same row their colleague sees.
+  const existing = await prisma.membershipDashboardMember.findUnique({
+    where: { organisationId },
+  });
 
   // Diff against the stored set: the action replaces the whole array, so the
   // audit record needs added/removed computed here rather than just the new
@@ -70,14 +72,16 @@ export async function saveRedeemedBenefitsAction(input: {
       });
       if (hasChanges) {
         await recordAuditLog(tx, {
-          entityType: "MembershipDashboardMember",
-          // Target User.id, not the projection row id, so member-history
-          // queries hit the (entityType, entityId) index.
-          entityId: user.id,
+          // Keyed on the organisation, so the trail is shared by its contacts
+          // and survives any one of them being deleted. Historical rows written
+          // against a User.id were re-keyed to this shape by the contract
+          // migration, which preserved their original keys in `data`.
+          entityType: "OrganisationBenefitRedemption",
+          entityId: String(organisationId),
           action: "UPDATE",
           actorId,
           data: {
-            targetUserId: user.id,
+            organisationId,
             memberKey: existing.memberKey,
             actorEmail,
             previous,
@@ -90,13 +94,11 @@ export async function saveRedeemedBenefitsAction(input: {
       return;
     }
 
-    const activeMembership = user.memberships.at(0) ?? null;
-    const memberKey = user.organisation?.slug ?? `user-${user.id.slice(0, 12)}`;
+    const memberKey = organisation.slug;
 
     await tx.membershipDashboardMember.create({
       data: {
-        userId: user.id,
-        membershipId: activeMembership?.id ?? null,
+        organisationId,
         memberKey,
         redeemedBenefitCodes: input.redeemedBenefitCodes,
       },
@@ -104,12 +106,12 @@ export async function saveRedeemedBenefitsAction(input: {
 
     if (hasChanges) {
       await recordAuditLog(tx, {
-        entityType: "MembershipDashboardMember",
-        entityId: user.id,
+        entityType: "OrganisationBenefitRedemption",
+        entityId: String(organisationId),
         action: "CREATE",
         actorId,
         data: {
-          targetUserId: user.id,
+          organisationId,
           memberKey,
           actorEmail,
           previous,
