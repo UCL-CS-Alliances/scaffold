@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Modal from "@/components/ui/Modal";
 import { signOut } from "next-auth/react";
 
@@ -69,6 +70,8 @@ export default function UserProfileForm(props: {
     initialTempPassword,
     onUserDeleted,
   } = props;
+
+  const router = useRouter();
 
   const isAdmin = mode === "admin-edit";
   const editingSelf = targetUserId === meId;
@@ -552,6 +555,17 @@ export default function UserProfileForm(props: {
       if (data.adminDemoted) {
         await signOut({ callbackUrl: "/sign-in" });
         return;
+      }
+
+      // The user picker is built server-side in account/page.tsx, so a change
+      // of organisation only reaches it on a re-fetch. Without this the contact
+      // stays under their previous organisation's group until a reload.
+      router.refresh();
+
+      // The move has landed, so this is the contact's organisation now — clears
+      // the "being moved" notice and restores the membership fields.
+      if (organisationChoice?.kind === "existing") {
+        setLoadedOrganisationId(organisationChoice.id);
       }
 
       setMessage("Saved.");
