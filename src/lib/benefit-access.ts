@@ -72,6 +72,27 @@ export function getSupersededBenefitIds(
   return superseded;
 }
 
+/**
+ * The benefit that replaces `benefitId` for this member, or null if none does.
+ * The mirror of getSupersededBenefitIds: a benefit only supersedes another once
+ * the member can actually access it, so this answers "which benefit should they
+ * be pointed at instead".
+ */
+export function getSupersedingBenefit(
+  memberRank: number | null,
+  benefitId: BenefitId
+): Benefit | null {
+  if (memberRank == null) return null;
+
+  return (
+    BENEFITS.find(
+      (benefit) =>
+        !!benefit.supersedes?.includes(benefitId) &&
+        hasBenefitAccess(memberRank, benefit.tierMin)
+    ) ?? null
+  );
+}
+
 /** The benefit catalogue as this member should see it, superseded ones removed. */
 export function getEffectiveBenefits(memberRank: number | null): Benefit[] {
   const superseded = getSupersededBenefitIds(memberRank);

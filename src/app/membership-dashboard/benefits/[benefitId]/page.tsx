@@ -1,7 +1,11 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { BENEFITS } from "@/content/benefits";
-import { hasBenefitAccess, resolveMemberRank } from "@/lib/benefit-access";
+import { BENEFITS, type Benefit } from "@/content/benefits";
+import {
+  getSupersedingBenefit,
+  hasBenefitAccess,
+  resolveMemberRank,
+} from "@/lib/benefit-access";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { getMemberDashboardData } from "@/lib/membership-dashboard";
 import SecondaryNav from "@/components/membership-dashboard/SecondaryNav";
@@ -10,11 +14,19 @@ type PageProps = {
   params: Promise<{ benefitId: string }>;
 };
 
-type BenefitStatus = "REDEEMED" | "HAS_ACCESS" | "NO_ACCESS";
+type BenefitStatus = "REDEEMED" | "SUPERSEDED" | "HAS_ACCESS" | "NO_ACCESS";
 
-function determineStatus(hasAccess: boolean, isRedeemed: boolean): BenefitStatus {
+// Precedence matters: a superseded benefit the member has already redeemed is
+// still reported as redeemed, and tier access is still checked first, so the
+// only status this adds is "eligible, unredeemed, but replaced by a better one".
+function determineStatus(
+  hasAccess: boolean,
+  isRedeemed: boolean,
+  isSuperseded: boolean,
+): BenefitStatus {
   if (!hasAccess) return "NO_ACCESS";
   if (isRedeemed) return "REDEEMED";
+  if (isSuperseded) return "SUPERSEDED";
   return "HAS_ACCESS";
 }
 
@@ -22,6 +34,8 @@ function getStatusMeta(status: BenefitStatus) {
   switch (status) {
     case "REDEEMED":
       return { symbol: "✅", label: "Redeemed" };
+    case "SUPERSEDED":
+      return { symbol: "⬆️", label: "Replaced by an upgraded benefit" };
     case "HAS_ACCESS":
       return { symbol: "🟡", label: "Available" };
     case "NO_ACCESS":
@@ -53,6 +67,11 @@ export default async function BenefitPage({ params }: PageProps) {
   // Default assumptions: not logged in / no membership data
   let hasAccess = false;
   let isRedeemed = false;
+  // The benefit that replaces this one for this member, if any. The member
+  // dashboard hides superseded benefits from its list, so without this the page
+  // is only reachable by direct URL — and used to present a replaced benefit as
+  // available, with a process to follow that no longer applies.
+  let supersededBy: Benefit | null = null;
 
   const session = await getServerAuthSession();
 
@@ -68,10 +87,11 @@ export default async function BenefitPage({ params }: PageProps) {
 
       hasAccess = hasBenefitAccess(myRank, benefit.tierMin);
       isRedeemed = memberData.redeemedBenefitCodes.includes(id);
+      supersededBy = getSupersedingBenefit(myRank, benefit.id);
     }
   }
 
-  const status = determineStatus(hasAccess, isRedeemed);
+  const status = determineStatus(hasAccess, isRedeemed, supersededBy != null);
   const { symbol, label } = getStatusMeta(status);
 
   const backHref = "/membership-dashboard/";
@@ -111,6 +131,33 @@ export default async function BenefitPage({ params }: PageProps) {
             </p>
 
             <p style={{ marginTop: "1.25rem" }}>
+              <Link
+                href={backHref}
+                className="button-link button-link--secondary"
+              >
+                Back to benefits list
+              </Link>
+            </p>
+          </>
+        )}
+
+        {status === "SUPERSEDED" && supersededBy && (
+          <>
+            <p>
+              Your membership tier includes {supersededBy.label}, which replaces
+              this benefit. Arrange that instead — there is no need to request
+              this one separately.
+            </p>
+
+            <p style={{ marginTop: "1.25rem" }}>
+              <Link
+                href={`/membership-dashboard/benefits/${supersededBy.id}`}
+                className="button-link button-link--primary"
+                style={{ marginRight: "0.75rem" }}
+              >
+                Go to {supersededBy.label}
+              </Link>
+
               <Link
                 href={backHref}
                 className="button-link button-link--secondary"
