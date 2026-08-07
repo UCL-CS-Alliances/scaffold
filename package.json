@@ -16,6 +16,7 @@
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
+    "db:seed:benefits": "tsx prisma/seed-benefits.ts",
     "db:studio": "prisma studio",
     "postinstall": "prisma generate"
   },
