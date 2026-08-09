@@ -79,6 +79,25 @@ Prisma runs each migration file in one transaction and PostgreSQL has transactio
 
 Never edit or delete a merged migration, never `prisma db push` against the shared DB, and never change schema in Supabase's SQL/Table editor. Do not run migrations automatically on every serverless build — concurrent PR/Production builds share the DB and can race. CI validates the full migration history + seed against an ephemeral Postgres, so this is caught without touching Supabase.
 
+## Reference data (the benefit catalogue)
+
+The `Benefit` and `BenefitAction` tables hold the membership benefit catalogue. A migration creates them **empty** — the content is seeded, not written into the migration SQL, so there is only ever one copy of it.
+
+**Never use `npm run db:seed` to populate them on a shared database.** That seed also upserts organisations, users and memberships from `prisma/members.yml` and will rewrite live partner records — including anything corrected by hand after a data migration. Use the catalogue-only seeder:
+
+```bash
+npm run db:seed:benefits
+```
+
+It writes `Benefit` and `BenefitAction` and nothing else. It never touches anything partner-scoped: no organisations, no memberships, and no `BenefitPartnerNote` rows. It reads `.env.local` then `.env` the same way the Prisma CLI does, preferring `DIRECT_URL`, but anything already exported wins — so `DATABASE_URL=… npm run db:seed:benefits` can target a scratch database without editing `.env.local`.
+
+Two properties worth relying on:
+
+- **Repeat-safe.** Benefits are upserted on `code` and nothing is ever pruned, so a benefit added through the admin UI survives. Steps are reconciled by position rather than deleted and recreated, so `BenefitAction.id` stays stable — which matters because the planned per-partner action tracker will hang progress rows off those ids with `ON DELETE CASCADE`.
+- **It is a content re-baseline, not routine maintenance.** The fixture wins for every code it knows about. Once benefits are editable through the admin UI, running this **reverts every admin edit** to benefit text. A benefit an admin has retired stays retired (`isActive` is not overwritten), but wording is not protected.
+
+**Ordering when the read path changes.** Code that reads these tables must not reach `main` until the rows exist, or every benefit view renders empty. Because Preview and Production share one Supabase database and migrations are applied by hand, this sequencing is not optional: apply the migration, run `npm run db:seed:benefits`, verify the row counts, and only then merge the code that reads them.
+
 ## Release smoke test
 
 - [ ] `npm ci`, `npm run typecheck`, and `npm run build` pass (`prisma generate` runs in `postinstall`). `npm run lint` is informational in CI while pre-existing `no-explicit-any` debt is cleared.
