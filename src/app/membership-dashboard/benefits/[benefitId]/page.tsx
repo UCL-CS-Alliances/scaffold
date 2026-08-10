@@ -87,7 +87,7 @@ export default async function BenefitPage({ params }: PageProps) {
 
       hasAccess = hasBenefitAccess(myRank, benefit.tierMin);
       isRedeemed = memberData.redeemedBenefitCodes.includes(id);
-      supersededBy = getSupersedingBenefit(myRank, benefit.id);
+      supersededBy = getSupersedingBenefit(myRank, BENEFITS, benefit.id);
     }
   }
 

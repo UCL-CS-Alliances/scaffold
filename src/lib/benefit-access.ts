@@ -1,9 +1,6 @@
 // src/lib/benefit-access.ts
 import {
-  BENEFITS,
   MEMBERSHIP_TIER_RANK,
-  type Benefit,
-  type BenefitId,
   type MembershipTierKey,
 } from "@/content/benefits";
 
@@ -18,8 +15,22 @@ import {
  * This module must stay free of server-only imports (prisma, next-auth,
  * next/headers): it is imported from client components as well as server
  * components, and pulling a server module into the client graph only appears
- * to work because the unused imports tree-shake out.
+ * to work because the unused imports tree-shake out. That constraint is why the
+ * catalogue is passed in rather than read here — the rules cannot query the
+ * database themselves, so the caller supplies the benefits and this module
+ * decides what the member may see.
  */
+
+/**
+ * The minimum a benefit has to expose for these rules to apply to it. Kept
+ * structural rather than tied to one concrete type so the same rules work for
+ * the content-side catalogue and the database-backed one.
+ */
+export type EligibilityBenefit = {
+  id: string;
+  tierMin: string;
+  supersedes?: readonly string[];
+};
 
 // Tier keys arrive from the database as free-form strings (MembershipTier.key),
 // so they are normalised to the content-side union before use.
@@ -44,12 +55,19 @@ export function resolveMemberRank(
   return normalised ? MEMBERSHIP_TIER_RANK[normalised] : null;
 }
 
+// tierMin arrives as a plain string once benefits are database rows, so it is
+// normalised here rather than relied on to be one of the four known keys. An
+// unrecognised tier denies access rather than throwing.
 export function hasBenefitAccess(
   memberRank: number | null,
-  tierMin: MembershipTierKey
+  tierMin: string
 ): boolean {
   if (memberRank == null) return false;
-  return memberRank >= MEMBERSHIP_TIER_RANK[tierMin];
+
+  const normalised = normaliseTierKey(tierMin);
+  if (!normalised) return false;
+
+  return memberRank >= MEMBERSHIP_TIER_RANK[normalised];
 }
 
 /**
@@ -58,12 +76,13 @@ export function hasBenefitAccess(
  * the half-day one (B08).
  */
 export function getSupersededBenefitIds(
-  memberRank: number | null
-): Set<BenefitId> {
-  const superseded = new Set<BenefitId>();
+  memberRank: number | null,
+  benefits: readonly EligibilityBenefit[]
+): Set<string> {
+  const superseded = new Set<string>();
   if (memberRank == null) return superseded;
 
-  BENEFITS.forEach((benefit) => {
+  benefits.forEach((benefit) => {
     if (!benefit.supersedes?.length) return;
     if (!hasBenefitAccess(memberRank, benefit.tierMin)) return;
     benefit.supersedes.forEach((id) => superseded.add(id));
@@ -78,14 +97,15 @@ export function getSupersededBenefitIds(
  * the member can actually access it, so this answers "which benefit should they
  * be pointed at instead".
  */
-export function getSupersedingBenefit(
+export function getSupersedingBenefit<T extends EligibilityBenefit>(
   memberRank: number | null,
-  benefitId: BenefitId
-): Benefit | null {
+  benefits: readonly T[],
+  benefitId: string
+): T | null {
   if (memberRank == null) return null;
 
   return (
-    BENEFITS.find(
+    benefits.find(
       (benefit) =>
         !!benefit.supersedes?.includes(benefitId) &&
         hasBenefitAccess(memberRank, benefit.tierMin)
@@ -93,8 +113,15 @@ export function getSupersedingBenefit(
   );
 }
 
-/** The benefit catalogue as this member should see it, superseded ones removed. */
-export function getEffectiveBenefits(memberRank: number | null): Benefit[] {
-  const superseded = getSupersededBenefitIds(memberRank);
-  return BENEFITS.filter((benefit) => !superseded.has(benefit.id));
+/**
+ * The benefit catalogue as this member should see it, superseded ones removed.
+ * Generic so callers get their own benefit type back rather than the minimal
+ * shape these rules need.
+ */
+export function getEffectiveBenefits<T extends EligibilityBenefit>(
+  memberRank: number | null,
+  benefits: readonly T[]
+): T[] {
+  const superseded = getSupersededBenefitIds(memberRank, benefits);
+  return benefits.filter((benefit) => !superseded.has(benefit.id));
 }

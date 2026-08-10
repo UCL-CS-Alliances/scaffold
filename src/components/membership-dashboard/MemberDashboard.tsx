@@ -4,6 +4,7 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
+import { BENEFITS } from "@/content/benefits";
 import {
   getEffectiveBenefits,
   hasBenefitAccess,
@@ -46,7 +47,10 @@ export default function MemberDashboard(props: MemberDashboardProps) {
   const redeemed = useMemo(() => new Set(redeemedBenefitCodes), [redeemedBenefitCodes]);
 
   // Benefits superseded by a better one the member already has are hidden
-  const benefitsEffective = useMemo(() => getEffectiveBenefits(myRank), [myRank]);
+  const benefitsEffective = useMemo(
+    () => getEffectiveBenefits(myRank, BENEFITS),
+    [myRank],
+  );
 
   const formattedExpiry =
     membershipExpiry != null
