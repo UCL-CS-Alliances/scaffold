@@ -331,3 +331,219 @@ export async function restoreCatalogueBenefitAction(input: {
 }): Promise<void> {
   await setBenefitActive(input.benefitId, true);
 }
+
+//
+// Step editing (the BenefitAction table; "step" in the API to avoid the
+// "BenefitAction action" pile-up). BenefitAction.id is what the per-partner
+// progress tracker (phase E) hangs rows off with ON DELETE CASCADE, which
+// dictates the shape of everything below: reordering UPDATEs position in
+// place and never recreates rows, and deletion is the one operation that
+// legitimately destroys partner progress — the UI must warn before calling it.
+//
+// Step edits are audited under the benefit they belong to (entityType
+// "Benefit", entityId the benefit's id), so a benefit's whole history — field
+// edits and step edits — reads as one trail. Deletion alone is action DELETE;
+// it is the only destructive member of this family and should be findable in
+// the trail without opening every UPDATE row.
+//
+
+export async function addBenefitStepAction(input: {
+  benefitId: number;
+  body: string;
+}): Promise<{ id: number }> {
+  const { actorId, actorEmail } = await getActor();
+
+  const body = String(input.body ?? "").trim();
+  if (!body) throw new Error("Step text is required.");
+
+  return prisma.$transaction(async (tx) => {
+    const benefit = await tx.benefit.findUnique({
+      where: { id: input.benefitId },
+      select: { id: true, code: true },
+    });
+    if (!benefit) throw new Error("Benefit not found.");
+
+    // New steps append; ordering to a spot in the middle is a reorder.
+    const maxPos = await tx.benefitAction.aggregate({
+      where: { benefitId: benefit.id },
+      _max: { position: true },
+    });
+    const position = (maxPos._max.position ?? -1) + 1;
+
+    const row = await tx.benefitAction.create({
+      data: { benefitId: benefit.id, position, body },
+    });
+
+    await recordAuditLog(tx, {
+      entityType: "Benefit",
+      entityId: String(benefit.id),
+      action: "UPDATE",
+      actorId,
+      data: {
+        code: benefit.code,
+        actorEmail,
+        changes: { steps: { added: [{ id: row.id, position, body }] } },
+      },
+    });
+
+    return { id: row.id };
+  });
+}
+
+export async function updateBenefitStepAction(input: {
+  benefitActionId: number;
+  body: string;
+}): Promise<void> {
+  const { actorId, actorEmail } = await getActor();
+
+  const body = String(input.body ?? "").trim();
+  if (!body) throw new Error("Step text is required.");
+
+  await prisma.$transaction(async (tx) => {
+    const step = await tx.benefitAction.findUnique({
+      where: { id: input.benefitActionId },
+      select: {
+        id: true,
+        position: true,
+        body: true,
+        benefit: { select: { id: true, code: true } },
+      },
+    });
+    if (!step) throw new Error("Step not found.");
+
+    // No-op saves are not audited, and here not written either.
+    if (step.body === body) return;
+
+    await tx.benefitAction.update({ where: { id: step.id }, data: { body } });
+
+    await recordAuditLog(tx, {
+      entityType: "Benefit",
+      entityId: String(step.benefit.id),
+      action: "UPDATE",
+      actorId,
+      data: {
+        code: step.benefit.code,
+        actorEmail,
+        changes: {
+          steps: {
+            edited: [
+              {
+                id: step.id,
+                position: step.position,
+                previous: step.body,
+                next: body,
+              },
+            ],
+          },
+        },
+      },
+    });
+  });
+}
+
+export async function deleteBenefitStepAction(input: {
+  benefitActionId: number;
+}): Promise<void> {
+  const { actorId, actorEmail } = await getActor();
+
+  await prisma.$transaction(async (tx) => {
+    const step = await tx.benefitAction.findUnique({
+      where: { id: input.benefitActionId },
+      select: {
+        id: true,
+        position: true,
+        body: true,
+        benefit: { select: { id: true, code: true } },
+      },
+    });
+    if (!step) throw new Error("Step not found.");
+
+    // Cascades every partner's progress rows for this step once phase E's
+    // table exists — deliberate, and the reason the UI confirms first.
+    await tx.benefitAction.delete({ where: { id: step.id } });
+
+    // Close the gap so positions stay dense. Later steps keep their ids —
+    // only their position moves, which is exactly the in-place rule.
+    await tx.benefitAction.updateMany({
+      where: { benefitId: step.benefit.id, position: { gt: step.position } },
+      data: { position: { decrement: 1 } },
+    });
+
+    await recordAuditLog(tx, {
+      entityType: "Benefit",
+      entityId: String(step.benefit.id),
+      action: "DELETE",
+      actorId,
+      data: {
+        code: step.benefit.code,
+        actorEmail,
+        changes: {
+          steps: {
+            removed: [{ id: step.id, position: step.position, body: step.body }],
+          },
+        },
+      },
+    });
+  });
+}
+
+export async function reorderBenefitStepsAction(input: {
+  benefitId: number;
+  orderedStepIds: number[];
+}): Promise<void> {
+  const { actorId, actorEmail } = await getActor();
+
+  await prisma.$transaction(async (tx) => {
+    const benefit = await tx.benefit.findUnique({
+      where: { id: input.benefitId },
+      select: { id: true, code: true },
+    });
+    if (!benefit) throw new Error("Benefit not found.");
+
+    const steps = await tx.benefitAction.findMany({
+      where: { benefitId: benefit.id },
+      orderBy: { position: "asc" },
+      select: { id: true },
+    });
+
+    const currentIds = steps.map((s) => s.id);
+    const currentIdSet = new Set(currentIds);
+    const nextIds = (input.orderedStepIds ?? []).map(Number);
+
+    // The submitted order must be a permutation of the current steps —
+    // reordering never adds or removes, so a stale editor (a colleague
+    // added or deleted a step meanwhile) fails loudly instead of scrambling.
+    const isPermutation =
+      nextIds.length === currentIds.length &&
+      new Set(nextIds).size === nextIds.length &&
+      nextIds.every((id) => currentIdSet.has(id));
+    if (!isPermutation) {
+      throw new Error(
+        "Step order does not match the benefit's current steps — reload and try again.",
+      );
+    }
+
+    // No-op orders are not written or audited.
+    if (nextIds.every((id, index) => id === currentIds[index])) return;
+
+    // UPDATE position in place: ids never change, so phase E's progress rows
+    // stay attached to the same steps. Never delete-and-recreate here.
+    for (const [position, id] of nextIds.entries()) {
+      await tx.benefitAction.update({ where: { id }, data: { position } });
+    }
+
+    await recordAuditLog(tx, {
+      entityType: "Benefit",
+      entityId: String(benefit.id),
+      action: "UPDATE",
+      actorId,
+      data: {
+        code: benefit.code,
+        actorEmail,
+        changes: {
+          steps: { reordered: { previous: currentIds, next: nextIds } },
+        },
+      },
+    });
+  });
+}
