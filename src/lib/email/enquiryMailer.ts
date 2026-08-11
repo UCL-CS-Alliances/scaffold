@@ -7,6 +7,7 @@ type SendMailArgs = {
   from: string;
   to: string;
   cc: string[];
+  reply_to: string;
   subject: string;
   text: string;
 };
@@ -76,6 +77,7 @@ export async function sendMailgun(args: SendMailArgs) {
     from: args.from,
     to: args.to,
     cc: args.cc,
+    "h:Reply-To": args.reply_to,
     subject: args.subject,
     text: args.text,
   });
