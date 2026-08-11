@@ -51,24 +51,36 @@ export type CatalogueBenefit = {
 
   process: CatalogueBenefitProcess;
   terms: string[];
+
+  /** Present only on an `includeRetired` read, so the shape existing callers
+   * hand to client components is unchanged. False means retired. */
+  isActive?: boolean;
 };
 
 /**
  * The catalogue as members and admins should see it, ordered as the Strategic
  * Alliances Team ordered it.
  *
- * Retired benefits (isActive = false) are excluded: retirement exists so a
- * benefit can be withdrawn without deleting it, which would dangle in the
- * redemption history that stores bare codes. Note the consequence for any
- * lookup that turns a redeemed code into a label — a code redeemed before its
- * benefit was retired will not resolve here, and the call site falls back to
- * showing the raw code.
+ * Retired benefits (isActive = false) are excluded by default: retirement
+ * exists so a benefit can be withdrawn without deleting it, which would dangle
+ * in the redemption history that stores bare codes. Note the consequence for
+ * any lookup that turns a redeemed code into a label — a code redeemed before
+ * its benefit was retired will not resolve here, and the call site falls back
+ * to showing the raw code.
+ *
+ * `includeRetired` exists for the admin catalogue editor, which has to show a
+ * retired benefit in order to restore it. It also surfaces `isActive` on each
+ * entry so the editor can tell the two apart; member-facing callers never pass
+ * it and their shape is unchanged.
  */
 export async function getBenefitCatalogue(
   client: BenefitCatalogueClient,
+  options: { includeRetired?: boolean } = {},
 ): Promise<CatalogueBenefit[]> {
+  const includeRetired = options.includeRetired ?? false;
+
   const rows = await client.benefit.findMany({
-    where: { isActive: true },
+    where: includeRetired ? {} : { isActive: true },
     orderBy: { sortOrder: "asc" },
     include: {
       tierMin: { select: { key: true, rank: true } },
@@ -77,6 +89,7 @@ export async function getBenefitCatalogue(
   });
 
   return rows.map((row) => ({
+    ...(includeRetired ? { isActive: row.isActive } : {}),
     id: row.code,
     label: row.label,
     description: row.description,
