@@ -13,7 +13,7 @@ export type EnquiryTopic = {
 };
 
 export const enquiriesTrelloBoardEmail =
-  "dhajas2+yjvdd0rqeblowexkd64g@boards.trello.com";
+  "uclcomputersciencealliances+e1iwirenv1yyv1kekohk@boards.trello.com";
 
 export const contactManagers: ContactManager[] = [
   {

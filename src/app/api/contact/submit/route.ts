@@ -189,7 +189,8 @@ export async function POST(req: Request) {
   // const to = manager.email;
   // const cc = [email, enquiriesTrelloBoardEmail];
   const to = email;
-  const cc = [email,enquiriesTrelloBoardEmail];
+  const cc = [manager.email,enquiriesTrelloBoardEmail];
+  const reply_to = "alliances@uclcomputerscience.org";
 
   try {
     console.log("Mailgun sending email:", process.env.MAILGUN_SENDING_EMAIL);
@@ -198,6 +199,7 @@ export async function POST(req: Request) {
       from,
       to,
       cc,
+      reply_to,
       subject: subjectLine,
       text: body,
     });
