@@ -172,6 +172,28 @@ export async function getBenefitCatalogueForEditor(
 }
 
 /**
+ * One partner's benefit notes, keyed by benefit code — one query for the
+ * whole map, not one per benefit. Both surfaces read through this: the admin
+ * editor takes the map, the member detail page reads a single entry out of
+ * it. A missing key means no note, which is the designed-for common case —
+ * the table stays sparse because an emptied note deletes the row.
+ *
+ * A plain object rather than a Map so the result can cross the server →
+ * client component boundary as props unchanged.
+ */
+export async function getBenefitPartnerNotesForOrganisation(
+  client: BenefitCatalogueClient,
+  organisationId: number,
+): Promise<Record<string, string>> {
+  const rows = await client.benefitPartnerNote.findMany({
+    where: { organisationId },
+    select: { body: true, benefit: { select: { code: true } } },
+  });
+
+  return Object.fromEntries(rows.map((row) => [row.benefit.code, row.body]));
+}
+
+/**
  * Every benefit code the catalogue knows about, retired ones included.
  *
  * Validation of a submitted code has to accept a retired benefit: an admin

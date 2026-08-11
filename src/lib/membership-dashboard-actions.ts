@@ -125,3 +125,96 @@ export async function saveRedeemedBenefitsAction(input: {
     }
   });
 }
+
+/**
+ * Save one partner's note on one benefit (phase D). The note belongs to the
+ * organisation, like membership and redemption: every contact at the partner
+ * sees the same note on the benefit detail page.
+ *
+ * An empty body deletes the row — "no note" stays a missing row, keeping the
+ * table as sparse as it was designed to be. Notes are admin-written *about*
+ * a partner: they must never reach a member-editable surface.
+ */
+export async function saveBenefitPartnerNoteAction(input: {
+  organisationId: number;
+  benefitCode: string;
+  body: string;
+}) {
+  const session = await getServerAuthSession();
+  // Cast via a narrow shape rather than `any`, so the tracked no-explicit-any
+  // lint baseline does not grow.
+  const user = session?.user as { roleKeys?: unknown } | undefined;
+  requireAdmin(user?.roleKeys);
+
+  const actorId = session?.user?.id ?? null;
+  const actorEmail = session?.user?.email ?? null;
+
+  const body = String(input.body ?? "").trim();
+  const organisationId = input.organisationId;
+
+  await prisma.$transaction(async (tx) => {
+    // Retired benefits are allowed: the detail page still renders for them,
+    // and a note explaining why a benefit went away is a legitimate use.
+    const benefit = await tx.benefit.findUnique({
+      where: { code: input.benefitCode },
+      select: { id: true, code: true },
+    });
+    if (!benefit) throw new Error(`Unknown benefit code: ${input.benefitCode}`);
+
+    const organisation = await tx.organisation.findUnique({
+      where: { id: organisationId },
+      select: { id: true },
+    });
+    if (!organisation) throw new Error("Organisation not found.");
+
+    const existing = await tx.benefitPartnerNote.findUnique({
+      where: {
+        benefitId_organisationId: {
+          benefitId: benefit.id,
+          organisationId,
+        },
+      },
+      select: { id: true, body: true },
+    });
+
+    const previous = existing?.body ?? null;
+    const next = body || null;
+
+    // No-op saves (unchanged text, or clearing a note that does not exist)
+    // write nothing and are not audited.
+    if (previous === next) return;
+
+    if (next === null) {
+      // previous !== next, so a row necessarily exists to delete.
+      if (existing) {
+        await tx.benefitPartnerNote.delete({ where: { id: existing.id } });
+      }
+    } else if (existing) {
+      await tx.benefitPartnerNote.update({
+        where: { id: existing.id },
+        data: { body: next },
+      });
+    } else {
+      await tx.benefitPartnerNote.create({
+        data: { benefitId: benefit.id, organisationId, body: next },
+      });
+    }
+
+    // Keyed on the organisation so a partner's whole history — redemption,
+    // notes — sits under one entityId and survives any one contact's
+    // deletion. Clearing is a genuine DELETE: the row is gone.
+    await recordAuditLog(tx, {
+      entityType: "OrganisationBenefitNote",
+      entityId: String(organisationId),
+      action: existing ? (next === null ? "DELETE" : "UPDATE") : "CREATE",
+      actorId,
+      data: {
+        organisationId,
+        benefitCode: benefit.code,
+        actorEmail,
+        previous,
+        next,
+      },
+    });
+  });
+}
