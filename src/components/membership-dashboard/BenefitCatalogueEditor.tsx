@@ -285,24 +285,33 @@ function CreateBenefitCard(props: {
 
 function StepEditorRow(props: {
   step: { id: number; body: string };
+  /** Partners with recorded progress on this step — their progress rows
+   * cascade away with the step, so the confirm dialog states the number. */
+  progressPartnerCount: number;
   isFirst: boolean;
   isLast: boolean;
   onMove: (stepId: number, delta: -1 | 1) => void;
   run: (fn: () => Promise<unknown>) => void;
   isPending: boolean;
 }) {
-  const { step, isFirst, isLast, onMove, run, isPending } = props;
+  const { step, progressPartnerCount, isFirst, isLast, onMove, run, isPending } =
+    props;
   // No resync effect: the row is keyed on the step's server body, so a change
   // that round-trips (a save, or a colleague's edit) remounts it fresh.
   const [body, setBody] = useState(step.body);
 
   function remove() {
-    // Once the per-partner progress tracker is live, deleting a step also
-    // deletes every partner's recorded progress on it (ON DELETE CASCADE) —
-    // the warning is required by the phase C spec.
+    // Deleting a step cascades every partner's recorded progress on it — the
+    // confirm must say so, and say how many partners that touches.
+    const progressWarning =
+      progressPartnerCount === 0
+        ? "No partner has recorded progress on this step yet."
+        : `${progressPartnerCount} partner${
+            progressPartnerCount === 1 ? " has" : "s have"
+          } recorded progress on this step, which will be permanently deleted with it.`;
+
     const confirmed = window.confirm(
-      "Delete this step? Members will no longer see it, and any recorded " +
-        "partner progress on this step will be permanently deleted with it. " +
+      `Delete this step? Members will no longer see it. ${progressWarning} ` +
         "This cannot be undone.",
     );
     if (!confirmed) return;
@@ -364,8 +373,9 @@ function BenefitEditorCard(props: {
   benefit: EditorBenefit;
   tierOptions: MembershipTierOption[];
   supersedeOptions: { code: string; label: string; isActive: boolean }[];
+  stepProgressCounts: Record<number, number>;
 }) {
-  const { benefit, tierOptions } = props;
+  const { benefit, tierOptions, stepProgressCounts } = props;
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [draft, setDraft] = useState(() => draftFromBenefit(benefit));
@@ -498,6 +508,7 @@ function BenefitEditorCard(props: {
             <StepEditorRow
               key={`${step.id}:${step.body}`}
               step={step}
+              progressPartnerCount={stepProgressCounts[step.id] ?? 0}
               isFirst={index === 0}
               isLast={index === benefit.steps.length - 1}
               onMove={moveStep}
@@ -547,8 +558,9 @@ function BenefitEditorCard(props: {
 export default function BenefitCatalogueEditor(props: {
   benefits: EditorBenefit[];
   tierOptions: MembershipTierOption[];
+  stepProgressCounts: Record<number, number>;
 }) {
-  const { benefits, tierOptions } = props;
+  const { benefits, tierOptions, stepProgressCounts } = props;
 
   const supersedeOptions = benefits.map((b) => ({
     code: b.code,
@@ -576,6 +588,7 @@ export default function BenefitCatalogueEditor(props: {
           benefit={b}
           tierOptions={tierOptions}
           supersedeOptions={supersedeOptions}
+          stepProgressCounts={stepProgressCounts}
         />
       ))}
     </>

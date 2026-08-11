@@ -124,6 +124,8 @@ export type EditorBenefit = {
   category: string;
   tierMinId: number;
   tierMinLabel: string;
+  /** Rank for eligibility checks (the admin progress tracker filters on it). */
+  tierMinRank: number;
   trigger: string | null;
   outcome: string | null;
   terms: string[];
@@ -146,7 +148,7 @@ export async function getBenefitCatalogueForEditor(
   const rows = await client.benefit.findMany({
     orderBy: { sortOrder: "asc" },
     include: {
-      tierMin: { select: { id: true, label: true } },
+      tierMin: { select: { id: true, label: true, rank: true } },
       actions: {
         orderBy: { position: "asc" },
         select: { id: true, position: true, body: true },
@@ -162,6 +164,7 @@ export async function getBenefitCatalogueForEditor(
     category: row.category,
     tierMinId: row.tierMin.id,
     tierMinLabel: row.tierMin.label,
+    tierMinRank: row.tierMin.rank,
     trigger: row.trigger,
     outcome: row.outcome,
     terms: row.terms,
@@ -219,6 +222,25 @@ export async function getBenefitActionProgressForOrganisation(
 
   return Object.fromEntries(
     rows.map((row) => [row.benefitActionId, { completedAt: row.completedAt }]),
+  );
+}
+
+/**
+ * How many partners have recorded progress on each step, keyed by
+ * BenefitAction.id. Steps nobody has progress on are absent. Feeds the
+ * editor's step-deletion warning: deletion cascades progress rows, and the
+ * confirm dialog must say how many partners that touches.
+ */
+export async function getBenefitActionProgressPartnerCounts(
+  client: BenefitCatalogueClient,
+): Promise<Record<number, number>> {
+  const rows = await client.benefitActionProgress.groupBy({
+    by: ["benefitActionId"],
+    _count: { _all: true },
+  });
+
+  return Object.fromEntries(
+    rows.map((row) => [row.benefitActionId, row._count._all]),
   );
 }
 

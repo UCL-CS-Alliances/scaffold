@@ -9,7 +9,11 @@ import type {
   MembershipTierOption,
 } from "@/lib/membership-dashboard-admin";
 import type { HandbookRenderResult } from "@/lib/handbook";
-import type { CatalogueBenefit, EditorBenefit } from "@/lib/benefits";
+import type {
+  BenefitActionProgressMap,
+  CatalogueBenefit,
+  EditorBenefit,
+} from "@/lib/benefits";
 
 type AdminDashboardProps = AdminDashboardSummary & {
   title?: string;
@@ -29,6 +33,8 @@ type AdminDashboardProps = AdminDashboardSummary & {
   benefitStats: AdminBenefitRedemptionStat[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
   partnerNotes: Record<string, string>;
+  partnerProgress: BenefitActionProgressMap;
+  stepProgressCounts: Record<number, number>;
 
   initialTab?: string | null;
   handbook: HandbookRenderResult;
@@ -58,6 +64,8 @@ export default function AdminDashboard({
   benefitStats,
   benefitAuditTrail,
   partnerNotes,
+  partnerProgress,
+  stepProgressCounts,
   initialTab = null,
   handbook,
 }: AdminDashboardProps) {
@@ -91,6 +99,8 @@ export default function AdminDashboard({
           benefitStats={benefitStats}
           benefitAuditTrail={benefitAuditTrail}
           partnerNotes={partnerNotes}
+          partnerProgress={partnerProgress}
+          stepProgressCounts={stepProgressCounts}
           initialTab={initialTab}
           handbook={handbook}
         />

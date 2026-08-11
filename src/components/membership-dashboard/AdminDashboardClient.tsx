@@ -4,7 +4,11 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { CatalogueBenefit, EditorBenefit } from "@/lib/benefits";
+import type {
+  BenefitActionProgressMap,
+  CatalogueBenefit,
+  EditorBenefit,
+} from "@/lib/benefits";
 import type {
   AdminBenefitAuditEntry,
   AdminBenefitRedemptionStat,
@@ -17,6 +21,7 @@ import { hasBenefitAccess } from "@/lib/benefit-access";
 import { saveRedeemedBenefitsAction } from "@/lib/membership-dashboard-actions";
 import BenefitCatalogueEditor from "./BenefitCatalogueEditor";
 import BenefitPartnerNotes from "./BenefitPartnerNotes";
+import BenefitProgressTracker from "./BenefitProgressTracker";
 
 type TabKey = "members" | "benefits" | "handbook";
 
@@ -87,6 +92,8 @@ export default function AdminDashboardClient(props: {
   benefitStats: AdminBenefitRedemptionStat[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
   partnerNotes: Record<string, string>;
+  partnerProgress: BenefitActionProgressMap;
+  stepProgressCounts: Record<number, number>;
   initialTab?: string | null;
   handbook: HandbookRenderResult;
 }) {
@@ -100,6 +107,8 @@ export default function AdminDashboardClient(props: {
     benefitStats,
     benefitAuditTrail,
     partnerNotes,
+    partnerProgress,
+    stepProgressCounts,
     initialTab,
     handbook,
   } = props;
@@ -531,6 +540,7 @@ export default function AdminDashboardClient(props: {
                   <BenefitCatalogueEditor
                     benefits={editorBenefits}
                     tierOptions={tierOptions}
+                    stepProgressCounts={stepProgressCounts}
                   />
                 ) : (
                 <div className="table-wrap">
@@ -663,6 +673,17 @@ export default function AdminDashboardClient(props: {
                   </button>
                   {isPending && <span className="small">Saving…</span>}
                 </div>
+
+                {selectedMember?.organisationId != null && (
+                  <div style={{ marginTop: "1.5rem" }}>
+                    <BenefitProgressTracker
+                      organisationId={selectedMember.organisationId}
+                      benefits={editorBenefits}
+                      progress={partnerProgress}
+                      memberRank={selectedMember.membershipTierRank}
+                    />
+                  </div>
+                )}
 
                 {selectedMember?.organisationId != null && (
                   <div style={{ marginTop: "1.5rem" }}>

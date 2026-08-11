@@ -22,6 +22,8 @@ import { pageCopy } from "@/content/pageCopy";
 import { userCanAccessApp } from "@/lib/access-control";
 import prisma from "@/lib/prisma";
 import {
+  getBenefitActionProgressForOrganisation,
+  getBenefitActionProgressPartnerCounts,
   getBenefitCatalogue,
   getBenefitCatalogueForEditor,
   getBenefitPartnerNotesForOrganisation,
@@ -120,16 +122,27 @@ export default async function MembershipDashboardPage(props: Props) {
       getMembershipTierOptions(),
     ]);
 
+    // Feeds the editor's step-deletion warning: how many partners' progress
+    // rows cascade away with each step.
+    const stepProgressCounts = await getBenefitActionProgressPartnerCounts(prisma);
+
     // The trail belongs to the organisation, so it needs the selected member's
     // organisation and cannot join the batch above.
     const benefitAuditTrail = selectedMember?.organisationId
       ? await getAdminBenefitAuditTrail(selectedMember.organisationId)
       : [];
 
-    // Same shape for the partner's benefit notes: organisation-scoped, so
-    // resolvable only once a member is selected.
+    // Same shape for the partner's benefit notes and step progress:
+    // organisation-scoped, so resolvable only once a member is selected.
     const partnerNotes = selectedMember?.organisationId
       ? await getBenefitPartnerNotesForOrganisation(
+          prisma,
+          selectedMember.organisationId,
+        )
+      : {};
+
+    const partnerProgress = selectedMember?.organisationId
+      ? await getBenefitActionProgressForOrganisation(
           prisma,
           selectedMember.organisationId,
         )
@@ -170,6 +183,8 @@ export default async function MembershipDashboardPage(props: Props) {
         benefitStats={benefitStats}
         benefitAuditTrail={benefitAuditTrail}
         partnerNotes={partnerNotes}
+        partnerProgress={partnerProgress}
+        stepProgressCounts={stepProgressCounts}
         initialTab={tab}
         handbook={handbook}
       />
