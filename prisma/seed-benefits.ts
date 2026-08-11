@@ -140,12 +140,15 @@ if (isDirectRun) {
   // files prisma.config.ts loads are not loaded for us. Same files, in
   // precedence order: anything already exported wins — which is how you point
   // the seeder at a scratch database without editing .env.local — then
-  // .env.local, then .env.
+  // .env.local, then .env. Note this is the opposite of prisma.config.ts, which
+  // loads .env.local with `override: true` and so discards what is exported.
   config({ path: '.env.local', quiet: true });
   config({ path: '.env', quiet: true });
 
   // Prefer the direct/session connection for bulk writes, as the CLI does.
-  const url = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+  // `||` rather than `??`: a blank `DIRECT_URL=` in an env file is a string, so
+  // `??` would keep it and refuse to run against a perfectly good DATABASE_URL.
+  const url = process.env.DIRECT_URL || process.env.DATABASE_URL;
 
   if (!url) {
     throw new Error(
