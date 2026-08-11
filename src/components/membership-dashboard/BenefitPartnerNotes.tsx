@@ -122,9 +122,10 @@ export default function BenefitPartnerNotes(props: {
 }) {
   const { organisationId, organisationName, benefits, notes } = props;
 
-  // A note can exist against a benefit that has since been retired; the
-  // active catalogue no longer lists it, but the note is still shown to the
-  // partner on that benefit's page, so it must stay editable and clearable.
+  // A note can exist against a benefit that has since been retired. Members
+  // cannot see it — a retired benefit's detail page 404s — but the note is
+  // dormant, not gone: it reappears if the benefit is restored, so it must
+  // stay visible, editable and clearable here rather than becoming orphaned.
   const orphanCodes = Object.keys(notes)
     .filter((code) => !benefits.some((b) => b.id === code))
     .sort();

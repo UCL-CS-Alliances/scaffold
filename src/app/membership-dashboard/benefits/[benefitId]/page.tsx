@@ -5,7 +5,11 @@ import {
   hasBenefitAccess,
   resolveMemberRank,
 } from "@/lib/benefit-access";
-import { getBenefitCatalogue, type CatalogueBenefit } from "@/lib/benefits";
+import {
+  getBenefitCatalogue,
+  getBenefitPartnerNotesForOrganisation,
+  type CatalogueBenefit,
+} from "@/lib/benefits";
 import prisma from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { getMemberDashboardData } from "@/lib/membership-dashboard";
@@ -66,6 +70,10 @@ export default async function BenefitPage({ params }: PageProps) {
   // is only reachable by direct URL — and used to present a replaced benefit as
   // available, with a process to follow that no longer applies.
   let supersededBy: CatalogueBenefit | null = null;
+  // The SAT-written note for this member's organisation on this benefit, if
+  // one exists. Partner-confidential, so the organisation comes from the
+  // session's user record — never from a query parameter.
+  let partnerNote: string | null = null;
 
   const session = await getServerAuthSession();
 
@@ -82,6 +90,14 @@ export default async function BenefitPage({ params }: PageProps) {
       hasAccess = hasBenefitAccess(myRank, benefit.tierMinRank);
       isRedeemed = memberData.redeemedBenefitCodes.includes(id);
       supersededBy = getSupersedingBenefit(myRank, benefits, benefit.id);
+
+      if (memberData.organisationId != null) {
+        const notes = await getBenefitPartnerNotesForOrganisation(
+          prisma,
+          memberData.organisationId,
+        );
+        partnerNote = notes[id] ?? null;
+      }
     }
   }
 
@@ -199,6 +215,21 @@ export default async function BenefitPage({ params }: PageProps) {
           </p>
         )}
       </section>
+
+      {/* Partner note: written by the SAT about this organisation, rendered on
+          every status — a note explaining why a benefit is unavailable or
+          replaced is exactly the useful case. Plain text, whitespace kept. */}
+      {partnerNote && (
+        <section
+          className="tile"
+          style={{ marginTop: "1.5rem", padding: "1rem" }}
+        >
+          <h2>Note from the Strategic Alliances Team</h2>
+          <p style={{ whiteSpace: "pre-wrap", marginTop: ".5rem" }}>
+            {partnerNote}
+          </p>
+        </section>
+      )}
 
       {/* HAS ACCESS ONLY: process + terms */}
       {status === "HAS_ACCESS" && (
