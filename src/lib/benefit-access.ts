@@ -28,7 +28,8 @@ import {
  */
 export type EligibilityBenefit = {
   id: string;
-  tierMin: string;
+  /** The membership rank required, resolved from MembershipTier. */
+  tierMinRank: number;
   supersedes?: readonly string[];
 };
 
@@ -55,19 +56,18 @@ export function resolveMemberRank(
   return normalised ? MEMBERSHIP_TIER_RANK[normalised] : null;
 }
 
-// tierMin arrives as a plain string once benefits are database rows, so it is
-// normalised here rather than relied on to be one of the four known keys. An
-// unrecognised tier denies access rather than throwing.
+/**
+ * Both ranks come from MembershipTier now — the member's through their
+ * organisation, the benefit's through its tierMin relation — so eligibility is
+ * a plain comparison and no longer consults a tier table defined in code. A
+ * tier added to the database therefore works without a code change.
+ */
 export function hasBenefitAccess(
   memberRank: number | null,
-  tierMin: string
+  tierMinRank: number
 ): boolean {
   if (memberRank == null) return false;
-
-  const normalised = normaliseTierKey(tierMin);
-  if (!normalised) return false;
-
-  return memberRank >= MEMBERSHIP_TIER_RANK[normalised];
+  return memberRank >= tierMinRank;
 }
 
 /**
@@ -84,7 +84,7 @@ export function getSupersededBenefitIds(
 
   benefits.forEach((benefit) => {
     if (!benefit.supersedes?.length) return;
-    if (!hasBenefitAccess(memberRank, benefit.tierMin)) return;
+    if (!hasBenefitAccess(memberRank, benefit.tierMinRank)) return;
     benefit.supersedes.forEach((id) => superseded.add(id));
   });
 
@@ -108,7 +108,7 @@ export function getSupersedingBenefit<T extends EligibilityBenefit>(
     benefits.find(
       (benefit) =>
         !!benefit.supersedes?.includes(benefitId) &&
-        hasBenefitAccess(memberRank, benefit.tierMin)
+        hasBenefitAccess(memberRank, benefit.tierMinRank)
     ) ?? null
   );
 }

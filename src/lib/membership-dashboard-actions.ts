@@ -4,7 +4,7 @@
 import { prisma } from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { recordAuditLog } from "@/lib/audit-log";
-import { BENEFITS, type BenefitId } from "@/content/benefits";
+import { getKnownBenefitCodes } from "@/lib/benefits";
 
 function requireAdmin(roleKeys: unknown) {
   const keys = Array.isArray(roleKeys) ? roleKeys : [];
@@ -15,7 +15,7 @@ function requireAdmin(roleKeys: unknown) {
 
 export async function saveRedeemedBenefitsAction(input: {
   organisationId: number;
-  redeemedBenefitCodes: BenefitId[];
+  redeemedBenefitCodes: string[];
 }) {
   const session = await getServerAuthSession();
   const roleKeys = (session?.user as any)?.roleKeys;
@@ -26,8 +26,10 @@ export async function saveRedeemedBenefitsAction(input: {
   const actorId = session?.user?.id ?? null;
   const actorEmail = session?.user?.email ?? null;
 
-  // Validate benefit ids exist
-  const allowed = new Set(BENEFITS.map((b) => b.id));
+  // Validate benefit ids exist. Codes are no longer a compile-time union, so
+  // this is the only thing standing between a hand-crafted request and an
+  // arbitrary string landing in redeemedBenefitCodes.
+  const allowed = await getKnownBenefitCodes(prisma);
   for (const code of input.redeemedBenefitCodes) {
     if (!allowed.has(code)) throw new Error(`Unknown benefit code: ${code}`);
   }

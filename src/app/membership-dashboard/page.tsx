@@ -20,7 +20,7 @@ import SignInForm from "@/components/SignInForm";
 import { pageCopy } from "@/content/pageCopy";
 import { userCanAccessApp } from "@/lib/access-control";
 import prisma from "@/lib/prisma";
-import { BENEFITS } from "@/content/benefits";
+import { getBenefitCatalogue } from "@/lib/benefits";
 
 type Props = {
   searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -118,9 +118,11 @@ export default async function MembershipDashboardPage(props: Props) {
         return b.redeemed - a.redeemed;
       })[0];
 
+    const benefits = await getBenefitCatalogue(prisma);
+
     const topBenefitLabel =
       top
-        ? BENEFITS.find((b) => b.id === top.benefitId)?.label ?? "Unknown benefit"
+        ? benefits.find((b) => b.id === top.benefitId)?.label ?? "Unknown benefit"
         : "Unknown benefit";
 
     return (
@@ -134,6 +136,7 @@ export default async function MembershipDashboardPage(props: Props) {
         members={members}
         selectedUserId={selectedUserId}
         selectedMember={selectedMember}
+        benefits={benefits}
         benefitStats={benefitStats}
         benefitAuditTrail={benefitAuditTrail}
         initialTab={tab}
@@ -156,5 +159,7 @@ export default async function MembershipDashboardPage(props: Props) {
     );
   }
 
-  return <MemberDashboard {...memberData} />;
+  const benefits = await getBenefitCatalogue(prisma);
+
+  return <MemberDashboard {...memberData} benefits={benefits} />;
 }

@@ -92,3 +92,18 @@ export async function getBenefitCatalogue(
     terms: row.terms,
   }));
 }
+
+/**
+ * Every benefit code the catalogue knows about, retired ones included.
+ *
+ * Validation of a submitted code has to accept a retired benefit: an admin
+ * clearing a redemption recorded before the benefit was withdrawn is editing
+ * history that is still legitimately there, and rejecting it would leave the
+ * code stuck on the organisation with no way to remove it.
+ */
+export async function getKnownBenefitCodes(
+  client: BenefitCatalogueClient,
+): Promise<Set<string>> {
+  const rows = await client.benefit.findMany({ select: { code: true } });
+  return new Set(rows.map((row) => row.code));
+}
