@@ -68,7 +68,7 @@ Migrations in `prisma/migrations/` are the schema authority.
 2. Interleave your `UPDATE`/`DELETE` statements among the generated DDL. Let Prisma generate all DDL and copy its constraint names; only the data statements are yours. Order matters — backfill before adding `NOT NULL` or a unique index, so the constraint is only checked once the data can satisfy it.
 3. `npx prisma migrate dev` to apply locally and regenerate the client.
 
-Prisma runs each migration file in one transaction and PostgreSQL has transactional DDL, so a failed backfill rolls the whole file back. Point `DATABASE_URL` at a scratch database first: `--create-only` still provisions a shadow database on whatever it points at, which must never be the shared Supabase project.
+Prisma runs each migration file in one transaction and PostgreSQL has transactional DDL, so a failed backfill rolls the whole file back. Point `.env.local` at a scratch database first: `--create-only` still provisions a shadow database on whatever the CLI resolves, which must never be the shared Supabase project. Editing `.env.local` is the only way to retarget it — `prisma.config.ts` loads that file with `override: true`, so exporting `DATABASE_URL` on the command line is silently ignored.
 
 > **`User_primary_contact_per_organisation_key` is invisible to `schema.prisma`.** Prisma cannot express a partial unique index, so this one lives only in `20260804130100_add_primary_contact_unique_index`. Verified on Prisma 6.19.3 that this causes **no** drift — the differ ignores partial indexes rather than trying to drop what it cannot represent, and `migrate dev --create-only` against a database carrying it produces an empty migration. Worth re-checking after a major Prisma upgrade: if a generated migration ever contains `DROP INDEX "User_primary_contact_per_organisation_key"`, delete that line before applying.
 
@@ -78,6 +78,25 @@ Prisma runs each migration file in one transaction and PostgreSQL has transactio
 3. Redeploy/retest the PR Preview if it built before the migration.
 
 Never edit or delete a merged migration, never `prisma db push` against the shared DB, and never change schema in Supabase's SQL/Table editor. Do not run migrations automatically on every serverless build — concurrent PR/Production builds share the DB and can race. CI validates the full migration history + seed against an ephemeral Postgres, so this is caught without touching Supabase.
+
+## Reference data (the benefit catalogue)
+
+The `Benefit` and `BenefitAction` tables hold the membership benefit catalogue. A migration creates them **empty** — the content is seeded, not written into the migration SQL, so there is only ever one copy of it.
+
+**Never use `npm run db:seed` to populate them on a shared database.** That seed also upserts organisations, users and memberships from `prisma/members.yml` and will rewrite live partner records — including anything corrected by hand after a data migration. Use the catalogue-only seeder:
+
+```bash
+npm run db:seed:benefits
+```
+
+It writes `Benefit` and `BenefitAction` and nothing else. It never touches anything partner-scoped: no organisations, no memberships, and no `BenefitPartnerNote` rows. It reads `.env.local` then `.env` and prefers `DIRECT_URL`, as the Prisma CLI does, but **unlike** the CLI it leaves an exported variable alone — so `DATABASE_URL=… npm run db:seed:benefits` targets a scratch database without editing `.env.local`. That trick does not work on `prisma migrate …`: `prisma.config.ts` loads `.env.local` with `override: true`, so the CLI goes wherever `.env.local` points no matter what you export. Retarget those by editing `.env.local`.
+
+Two properties worth relying on:
+
+- **Repeat-safe.** Benefits are upserted on `code` and nothing is ever pruned, so a benefit added through the admin UI survives. Steps are reconciled by position rather than deleted and recreated, so `BenefitAction.id` stays stable — which matters because the planned per-partner action tracker will hang progress rows off those ids with `ON DELETE CASCADE`.
+- **It is a content re-baseline, not routine maintenance.** The fixture wins for every code it knows about. Once benefits are editable through the admin UI, running this **reverts every admin edit** to benefit text. A benefit an admin has retired stays retired (`isActive` is not overwritten), but wording is not protected.
+
+**Ordering when the read path changes.** Code that reads these tables must not reach `main` until the rows exist, or every benefit view renders empty. Because Preview and Production share one Supabase database and migrations are applied by hand, this sequencing is not optional: apply the migration, run `npm run db:seed:benefits`, verify the row counts, and only then merge the code that reads them.
 
 ## Release smoke test
 

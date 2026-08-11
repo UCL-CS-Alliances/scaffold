@@ -20,7 +20,7 @@ import SignInForm from "@/components/SignInForm";
 import { pageCopy } from "@/content/pageCopy";
 import { userCanAccessApp } from "@/lib/access-control";
 import prisma from "@/lib/prisma";
-import { BENEFITS } from "@/content/benefits";
+import { getBenefitCatalogue } from "@/lib/benefits";
 
 type Props = {
   searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -87,6 +87,10 @@ export default async function MembershipDashboardPage(props: Props) {
     const tab = pickFirst(sp?.tab) ?? null; // "members" | "benefits" | "handbook"
     const chapter = pickFirst(sp?.chapter) ?? null;
 
+    // Resolved before the batch because the redemption stats are computed from
+    // it; the client component receives the same list.
+    const benefits = await getBenefitCatalogue(prisma);
+
     const [summary, members, selectedMember, benefitStats, handbook, totalUsers] =
       await Promise.all([
         getAdminDashboardSummary(),
@@ -94,7 +98,7 @@ export default async function MembershipDashboardPage(props: Props) {
         selectedUserId
           ? getAdminSelectedMember(selectedUserId)
           : Promise.resolve(null),
-        getAdminBenefitRedemptionStats(),
+        getAdminBenefitRedemptionStats(benefits),
         renderHandbookChapterBySlug(chapter ?? undefined),
         prisma.user.count(),
       ]);
@@ -120,7 +124,7 @@ export default async function MembershipDashboardPage(props: Props) {
 
     const topBenefitLabel =
       top
-        ? BENEFITS.find((b) => b.id === top.benefitId)?.label ?? "Unknown benefit"
+        ? benefits.find((b) => b.id === top.benefitId)?.label ?? "Unknown benefit"
         : "Unknown benefit";
 
     return (
@@ -134,6 +138,7 @@ export default async function MembershipDashboardPage(props: Props) {
         members={members}
         selectedUserId={selectedUserId}
         selectedMember={selectedMember}
+        benefits={benefits}
         benefitStats={benefitStats}
         benefitAuditTrail={benefitAuditTrail}
         initialTab={tab}
@@ -156,5 +161,7 @@ export default async function MembershipDashboardPage(props: Props) {
     );
   }
 
-  return <MemberDashboard {...memberData} />;
+  const benefits = await getBenefitCatalogue(prisma);
+
+  return <MemberDashboard {...memberData} benefits={benefits} />;
 }

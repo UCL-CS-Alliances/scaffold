@@ -1,6 +1,6 @@
 // src/lib/membership-dashboard-admin.ts
 import { prisma } from "@/lib/prisma";
-import { BENEFITS, type BenefitId } from "@/content/benefits";
+import type { CatalogueBenefit } from "@/lib/benefits";
 import { hasBenefitAccess } from "@/lib/benefit-access";
 import {
   getMembershipForOrganisation,
@@ -40,7 +40,7 @@ export type AdminSelectedMember = {
   defaultAppKey: string | null;
   defaultAppName: string | null;
 
-  redeemedBenefitCodes: BenefitId[];
+  redeemedBenefitCodes: string[];
 };
 
 // Sign-ins are moments rather than dates, so the label carries a time — same
@@ -164,7 +164,7 @@ export async function getAdminSelectedMember(userId: string): Promise<AdminSelec
       ])
     : [null, [] as string[]];
 
-  const redeemed = redeemedCodes as BenefitId[];
+  const redeemed = redeemedCodes;
 
   return {
     userId: user.id,
@@ -241,13 +241,18 @@ export async function getAdminBenefitAuditTrail(
 }
 
 export type AdminBenefitRedemptionStat = {
-  benefitId: BenefitId;
+  benefitId: string;
   eligible: number;
   redeemed: number;
   percent: number | null; // null when eligible=0
 };
 
-export async function getAdminBenefitRedemptionStats(): Promise<AdminBenefitRedemptionStat[]> {
+// The catalogue is passed in rather than resolved here, as the eligibility
+// rules take it: the page already needs it for the client component, so
+// resolving it once and threading it through keeps it to a single query.
+export async function getAdminBenefitRedemptionStats(
+  benefits: CatalogueBenefit[],
+): Promise<AdminBenefitRedemptionStat[]> {
   // Fetch the active MEMBER role id (consistent with your other admin summary logic)
   const memberRole = await prisma.role.findUnique({ where: { key: "MEMBER" } });
 
@@ -275,7 +280,7 @@ export async function getAdminBenefitRedemptionStats(): Promise<AdminBenefitRede
   );
 
   if (!rankByOrganisation.size) {
-    return BENEFITS.map((b) => ({
+    return benefits.map((b) => ({
       benefitId: b.id,
       eligible: 0,
       redeemed: 0,
@@ -299,9 +304,9 @@ export async function getAdminBenefitRedemptionStats(): Promise<AdminBenefitRede
     }),
   );
 
-  return BENEFITS.map((b) => {
+  return benefits.map((b) => {
     const eligibleOrganisations = organisations.filter((o) =>
-      hasBenefitAccess(o.tierRank, b.tierMin),
+      hasBenefitAccess(o.tierRank, b.tierMinRank),
     );
     const eligible = eligibleOrganisations.length;
     const redeemed = eligibleOrganisations.filter((o) => o.redeemed.has(b.id)).length;

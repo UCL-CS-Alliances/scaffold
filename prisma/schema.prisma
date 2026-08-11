@@ -62,6 +62,10 @@ model Organisation {
   // organisation's — a free workshop is consumed once, not once per contact.
   membership      Membership?
   dashboardMember MembershipDashboardMember?
+
+  // Admin-written notes about a specific benefit for this partner. The note is
+  // the organisation's for the same reason its membership is.
+  benefitNotes BenefitPartnerNote[]
 }
 
 enum OrganisationType {
@@ -100,6 +104,7 @@ model MembershipTier {
 
   memberships    Membership[]
   appAccessRules AppAccessRule[]
+  benefits       Benefit[]
 }
 
 model Membership {
@@ -176,6 +181,85 @@ model MembershipDashboardMember {
 
   // App-specific fields only
   redeemedBenefitCodes String[] // ["B03", "B08", ...]
+}
+
+// BENEFIT CATALOGUE
+// -----------------
+// The catalogue was content-as-code. It lives here so the Strategic Alliances
+// Team can edit it without a deploy, and so notes and per-action progress can
+// hang off a benefit. Its starting set is the seed fixture in
+// prisma/fixtures/benefits.ts.
+
+model Benefit {
+  id   Int    @id @default(autoincrement())
+  code String @unique // "B01" — stable identity; redeemedBenefitCodes stores these
+
+  label       String
+  description String
+  category    String
+
+  // A relation rather than a string: tiers are DB-driven and carry the rank
+  // the access check compares against, so a resolved rank can be handed to
+  // client components without the content-side MEMBERSHIP_TIER_RANK lookup.
+  tierMin   MembershipTier @relation(fields: [tierMinId], references: [id])
+  tierMinId Int
+
+  // The scalar halves of the old content-side `process` object. Its ordered
+  // steps live in BenefitAction so a per-partner tracker can reference a
+  // stable id rather than an array position.
+  trigger String?
+  outcome String?
+
+  terms String[]
+
+  // Codes of the benefits this one replaces, mirroring how redeemedBenefitCodes
+  // stores bare codes. Validated when the catalogue is edited, not by the
+  // database.
+  supersedesCodes String[]
+
+  // Retire rather than delete: redeemedBenefitCodes holds bare codes with no
+  // foreign key, so a deleted benefit would dangle in redemption history.
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  actions BenefitAction[]
+  notes   BenefitPartnerNote[]
+
+  @@index([tierMinId])
+}
+
+model BenefitAction {
+  id        Int     @id @default(autoincrement())
+  benefit   Benefit @relation(fields: [benefitId], references: [id], onDelete: Cascade)
+  benefitId Int
+
+  // Deliberately *not* @@unique([benefitId, position]): reordering steps under
+  // a unique constraint needs placeholder values. Ordered on read instead.
+  position Int
+  body     String
+
+  @@index([benefitId, position])
+}
+
+model BenefitPartnerNote {
+  id Int @id @default(autoincrement())
+
+  benefit   Benefit @relation(fields: [benefitId], references: [id], onDelete: Cascade)
+  benefitId Int
+
+  // The note belongs to the partner organisation, not to one contact — the
+  // same rule as membership and benefit redemption.
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  organisationId Int
+
+  body String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One editable note per partner per benefit, overwritten in place.
+  @@unique([benefitId, organisationId])
+  @@index([organisationId])
 }
 
 // AUTH MODELS (NextAuth-style)

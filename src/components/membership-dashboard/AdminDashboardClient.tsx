@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BENEFITS, type BenefitId } from "@/content/benefits";
+import type { CatalogueBenefit } from "@/lib/benefits";
 import type {
   AdminBenefitAuditEntry,
   AdminBenefitRedemptionStat,
@@ -38,8 +38,11 @@ function formatDateTimeGB(d: Date | string) {
   }).format(date);
 }
 
-function benefitLabel(code: string) {
-  return BENEFITS.find((b) => b.id === code)?.label ?? code;
+// Codes come from the audit trail, which records what was redeemed at the time.
+// A code whose benefit has since been retired will not be in the catalogue, so
+// the raw code is shown rather than nothing.
+function benefitLabel(benefits: CatalogueBenefit[], code: string) {
+  return benefits.find((b) => b.id === code)?.label ?? code;
 }
 
 // Actor display for an audit entry; actorId is nulled when the admin account
@@ -65,6 +68,7 @@ export default function AdminDashboardClient(props: {
   members: AdminMemberListItem[];
   selectedUserId: string | null;
   selectedMember: AdminSelectedMember | null;
+  benefits: CatalogueBenefit[];
   benefitStats: AdminBenefitRedemptionStat[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
   initialTab?: string | null;
@@ -74,6 +78,7 @@ export default function AdminDashboardClient(props: {
     members,
     selectedUserId,
     selectedMember,
+    benefits,
     benefitStats,
     benefitAuditTrail,
     initialTab,
@@ -222,13 +227,13 @@ export default function AdminDashboardClient(props: {
     return m;
   }, [benefitStats]);
 
-  const [draftRedeemed, setDraftRedeemed] = useState<Set<BenefitId>>(
-    new Set((selectedMember?.redeemedBenefitCodes ?? []) as BenefitId[]),
+  const [draftRedeemed, setDraftRedeemed] = useState<Set<string>>(
+    new Set((selectedMember?.redeemedBenefitCodes ?? []) as string[]),
   );
 
   useEffect(() => {
     setDraftRedeemed(
-      new Set((selectedMember?.redeemedBenefitCodes ?? []) as BenefitId[]),
+      new Set((selectedMember?.redeemedBenefitCodes ?? []) as string[]),
     );
   }, [selectedUserId, selectedMember]);
 
@@ -468,7 +473,7 @@ export default function AdminDashboardClient(props: {
                       </tr>
                     </thead>
                     <tbody>
-                      {BENEFITS.map((b) => {
+                      {benefits.map((b) => {
                         const stat = benefitStatsMap.get(b.id);
                         const pct =
                           stat?.percent == null ? "—" : `${stat.percent}%`;
@@ -507,10 +512,10 @@ export default function AdminDashboardClient(props: {
                 </p>
 
                 <ul className="list-plain" style={{ marginTop: ".75rem" }}>
-                  {BENEFITS.map((b) => {
+                  {benefits.map((b) => {
                     const included = hasBenefitAccess(
                       selectedMember?.membershipTierRank ?? null,
-                      b.tierMin,
+                      b.tierMinRank,
                     );
                     const checked = draftRedeemed.has(b.id);
 
@@ -615,12 +620,12 @@ export default function AdminDashboardClient(props: {
                           <div className="cluster" style={{ marginTop: ".4rem" }}>
                             {entry.added.map((code) => (
                               <span key={`added-${code}`} className="pill">
-                                + {benefitLabel(code)}
+                                + {benefitLabel(benefits, code)}
                               </span>
                             ))}
                             {entry.removed.map((code) => (
                               <span key={`removed-${code}`} className="pill">
-                                − {benefitLabel(code)}
+                                − {benefitLabel(benefits, code)}
                               </span>
                             ))}
                           </div>

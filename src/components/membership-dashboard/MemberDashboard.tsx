@@ -4,6 +4,7 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
+import type { CatalogueBenefit } from "@/lib/benefits";
 import {
   getEffectiveBenefits,
   hasBenefitAccess,
@@ -23,6 +24,10 @@ type MemberDashboardProps = {
   membershipManagerName: string | null;
 
   redeemedBenefitCodes: string[];
+
+  // Resolved by the server component: this is a client component and cannot
+  // read the catalogue itself.
+  benefits: CatalogueBenefit[];
 };
 
 type BenefitFilter = "redeemed" | "available" | "locked" | null;
@@ -37,6 +42,7 @@ export default function MemberDashboard(props: MemberDashboardProps) {
     membershipExpiry,
     membershipManagerName,
     redeemedBenefitCodes,
+    benefits,
   } = props;
 
   const [filter, setFilter] = useState<BenefitFilter>(null);
@@ -46,7 +52,10 @@ export default function MemberDashboard(props: MemberDashboardProps) {
   const redeemed = useMemo(() => new Set(redeemedBenefitCodes), [redeemedBenefitCodes]);
 
   // Benefits superseded by a better one the member already has are hidden
-  const benefitsEffective = useMemo(() => getEffectiveBenefits(myRank), [myRank]);
+  const benefitsEffective = useMemo(
+    () => getEffectiveBenefits(myRank, benefits),
+    [myRank, benefits],
+  );
 
   const formattedExpiry =
     membershipExpiry != null
@@ -67,7 +76,7 @@ export default function MemberDashboard(props: MemberDashboardProps) {
       let state: Exclude<BenefitFilter, null> = "locked";
       let symbol = "🔒";
 
-      if (hasBenefitAccess(myRank, b.tierMin)) {
+      if (hasBenefitAccess(myRank, b.tierMinRank)) {
         if (redeemed.has(b.id)) {
           state = "redeemed";
           symbol = "✅";

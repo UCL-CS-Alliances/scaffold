@@ -6,6 +6,7 @@ import { parse } from 'yaml';
 import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { seedBenefits } from './seed-benefits';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -391,6 +392,12 @@ async function main() {
   const tierIdByYaml = await seedMembershipTiers();
   const roleIdByKey = await seedRoles();
   const apps = await seedApps();
+
+  // Reference data, alongside tiers/roles/apps: it needs the tiers to exist and
+  // nothing else needs it. Lives in its own module because it must also be
+  // runnable on its own, without the members.yml writes below.
+  await seedBenefits(prisma);
+
   const memberRoleId = roleIdByKey.get('MEMBER');
 
   if (!memberRoleId) {

@@ -1,7 +1,12 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { BENEFITS } from "@/content/benefits";
-import { hasBenefitAccess, resolveMemberRank } from "@/lib/benefit-access";
+import {
+  getSupersedingBenefit,
+  hasBenefitAccess,
+  resolveMemberRank,
+} from "@/lib/benefit-access";
+import { getBenefitCatalogue, type CatalogueBenefit } from "@/lib/benefits";
+import prisma from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { getMemberDashboardData } from "@/lib/membership-dashboard";
 import SecondaryNav from "@/components/membership-dashboard/SecondaryNav";
@@ -10,11 +15,19 @@ type PageProps = {
   params: Promise<{ benefitId: string }>;
 };
 
-type BenefitStatus = "REDEEMED" | "HAS_ACCESS" | "NO_ACCESS";
+type BenefitStatus = "REDEEMED" | "SUPERSEDED" | "HAS_ACCESS" | "NO_ACCESS";
 
-function determineStatus(hasAccess: boolean, isRedeemed: boolean): BenefitStatus {
+// Precedence matters: a superseded benefit the member has already redeemed is
+// still reported as redeemed, and tier access is still checked first, so the
+// only status this adds is "eligible, unredeemed, but replaced by a better one".
+function determineStatus(
+  hasAccess: boolean,
+  isRedeemed: boolean,
+  isSuperseded: boolean,
+): BenefitStatus {
   if (!hasAccess) return "NO_ACCESS";
   if (isRedeemed) return "REDEEMED";
+  if (isSuperseded) return "SUPERSEDED";
   return "HAS_ACCESS";
 }
 
@@ -22,6 +35,8 @@ function getStatusMeta(status: BenefitStatus) {
   switch (status) {
     case "REDEEMED":
       return { symbol: "✅", label: "Redeemed" };
+    case "SUPERSEDED":
+      return { symbol: "⬆️", label: "Replaced by an upgraded benefit" };
     case "HAS_ACCESS":
       return { symbol: "🟡", label: "Available" };
     case "NO_ACCESS":
@@ -30,29 +45,27 @@ function getStatusMeta(status: BenefitStatus) {
   }
 }
 
-// Support both legacy array process and the newer structured process object
-type ProcessObject = {
-  trigger?: string;
-  actions?: string[];
-  outcome?: string;
-};
-
-function isProcessObject(value: unknown): value is ProcessObject {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
 export default async function BenefitPage({ params }: PageProps) {
   const { benefitId } = await params;
 
   const id = benefitId?.toUpperCase().trim();
   if (!id) notFound();
 
-  const benefit = BENEFITS.find((b) => b.id === id);
+  const benefits = await getBenefitCatalogue(prisma);
+
+  // A retired benefit is not in the catalogue, so its page 404s rather than
+  // presenting a benefit that has been withdrawn.
+  const benefit = benefits.find((b) => b.id === id);
   if (!benefit) notFound();
 
   // Default assumptions: not logged in / no membership data
   let hasAccess = false;
   let isRedeemed = false;
+  // The benefit that replaces this one for this member, if any. The member
+  // dashboard hides superseded benefits from its list, so without this the page
+  // is only reachable by direct URL — and used to present a replaced benefit as
+  // available, with a process to follow that no longer applies.
+  let supersededBy: CatalogueBenefit | null = null;
 
   const session = await getServerAuthSession();
 
@@ -66,25 +79,21 @@ export default async function BenefitPage({ params }: PageProps) {
         memberData.membershipTierKey,
       );
 
-      hasAccess = hasBenefitAccess(myRank, benefit.tierMin);
+      hasAccess = hasBenefitAccess(myRank, benefit.tierMinRank);
       isRedeemed = memberData.redeemedBenefitCodes.includes(id);
+      supersededBy = getSupersedingBenefit(myRank, benefits, benefit.id);
     }
   }
 
-  const status = determineStatus(hasAccess, isRedeemed);
+  const status = determineStatus(hasAccess, isRedeemed, supersededBy != null);
   const { symbol, label } = getStatusMeta(status);
 
   const backHref = "/membership-dashboard/";
 
-  const processValue = benefit.process as unknown;
-
-  const processAsObject = isProcessObject(processValue)
-    ? (processValue as ProcessObject)
-    : null;
-
-  const processAsArray = Array.isArray(processValue)
-    ? (processValue as string[])
-    : null;
+  const process = benefit.process;
+  const hasProcess = Boolean(
+    process.trigger || process.outcome || process.actions.length > 0,
+  );
 
   return (
     <section className="content-section">
@@ -111,6 +120,33 @@ export default async function BenefitPage({ params }: PageProps) {
             </p>
 
             <p style={{ marginTop: "1.25rem" }}>
+              <Link
+                href={backHref}
+                className="button-link button-link--secondary"
+              >
+                Back to benefits list
+              </Link>
+            </p>
+          </>
+        )}
+
+        {status === "SUPERSEDED" && supersededBy && (
+          <>
+            <p>
+              Your membership tier includes {supersededBy.label}, which replaces
+              this benefit. Arrange that instead — there is no need to request
+              this one separately.
+            </p>
+
+            <p style={{ marginTop: "1.25rem" }}>
+              <Link
+                href={`/membership-dashboard/benefits/${supersededBy.id}`}
+                className="button-link button-link--primary"
+                style={{ marginRight: "0.75rem" }}
+              >
+                Go to {supersededBy.label}
+              </Link>
+
               <Link
                 href={backHref}
                 className="button-link button-link--secondary"
@@ -168,68 +204,54 @@ export default async function BenefitPage({ params }: PageProps) {
       {status === "HAS_ACCESS" && (
         <>
           {/* Process */}
-          {(processAsObject || (processAsArray && processAsArray.length > 0)) && (
+          {hasProcess && (
             <section className="benefit-process" style={{ marginTop: "1.5rem" }}>
               <h2>How this benefit works</h2>
               <p>To redeem this benefit, follow the process outlined below.</p>
 
-              {/* New structured process */}
-              {processAsObject && (
-                <>
-                  {processAsObject.trigger && (
-                    <section style={{ marginTop: "1rem" }}>
-                      <h3>Trigger</h3>
-                      <p>{processAsObject.trigger}</p>
-                      <button
-                        type="button"
-                        className="button-link button-link--primary"
-                        disabled
-                        aria-disabled="true"
-title="This action will be enabled in a future release."
-                        style={{ marginTop: "0.5rem" }}
-                      >
-                        Redeem benefit now
-                      </button>
-                    </section>
-                  )}
-
-                  {processAsObject.actions && processAsObject.actions.length > 0 && (
-                    <section style={{ marginTop: "1.25rem" }}>
-                      <h3>Actions</h3>
-                      <ul>
-                        {processAsObject.actions.map((step, idx) => (
-                          <li key={idx}>{step}</li>
-                        ))}
-                      </ul>
-                    </section>
-                  )}
-
-                  {processAsObject.outcome && (
-                    <section style={{ marginTop: "1.25rem" }}>
-                      <h3>Outcome</h3>
-                      <p>{processAsObject.outcome}</p>
-                      <button
-                        type="button"
-                        className="button-link button-link--primary"
-                        disabled
-                        aria-disabled="true"
-title="This action will be enabled in a future release."
-                        style={{ marginTop: "0.5rem" }}
-                      >
-                        Launch partner satisfaction survey
-                      </button>
-                    </section>
-                  )}
-                </>
+              {process.trigger && (
+                <section style={{ marginTop: "1rem" }}>
+                  <h3>Trigger</h3>
+                  <p>{process.trigger}</p>
+                  <button
+                    type="button"
+                    className="button-link button-link--primary"
+                    disabled
+                    aria-disabled="true"
+                    title="This action will be enabled in a future release."
+                    style={{ marginTop: "0.5rem" }}
+                  >
+                    Redeem benefit now
+                  </button>
+                </section>
               )}
 
-              {/* Legacy array process (fallback) */}
-              {processAsArray && (
-                <ul style={{ marginTop: "1rem" }}>
-                  {processAsArray.map((step, idx) => (
-                    <li key={idx}>{step}</li>
-                  ))}
-                </ul>
+              {process.actions.length > 0 && (
+                <section style={{ marginTop: "1.25rem" }}>
+                  <h3>Actions</h3>
+                  <ul>
+                    {process.actions.map((step, idx) => (
+                      <li key={idx}>{step}</li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {process.outcome && (
+                <section style={{ marginTop: "1.25rem" }}>
+                  <h3>Outcome</h3>
+                  <p>{process.outcome}</p>
+                  <button
+                    type="button"
+                    className="button-link button-link--primary"
+                    disabled
+                    aria-disabled="true"
+                    title="This action will be enabled in a future release."
+                    style={{ marginTop: "0.5rem" }}
+                  >
+                    Launch partner satisfaction survey
+                  </button>
+                </section>
               )}
             </section>
           )}
