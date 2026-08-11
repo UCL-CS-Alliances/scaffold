@@ -6,8 +6,10 @@ import {
   resolveMemberRank,
 } from "@/lib/benefit-access";
 import {
+  getBenefitActionProgressForOrganisation,
   getBenefitCatalogue,
   getBenefitPartnerNotesForOrganisation,
+  type BenefitActionProgressMap,
   type CatalogueBenefit,
 } from "@/lib/benefits";
 import prisma from "@/lib/prisma";
@@ -74,6 +76,9 @@ export default async function BenefitPage({ params }: PageProps) {
   // one exists. Partner-confidential, so the organisation comes from the
   // session's user record — never from a query parameter.
   let partnerNote: string | null = null;
+  // The organisation's admin-recorded progress through this benefit's steps,
+  // keyed by step id. Read-only here — members see it, never change it.
+  let progress: BenefitActionProgressMap = {};
 
   const session = await getServerAuthSession();
 
@@ -97,6 +102,11 @@ export default async function BenefitPage({ params }: PageProps) {
           memberData.organisationId,
         );
         partnerNote = notes[id] ?? null;
+
+        progress = await getBenefitActionProgressForOrganisation(
+          prisma,
+          memberData.organisationId,
+        );
       }
     }
   }
@@ -257,16 +267,54 @@ export default async function BenefitPage({ params }: PageProps) {
                 </section>
               )}
 
-              {process.actions.length > 0 && (
-                <section style={{ marginTop: "1.25rem" }}>
-                  <h3>Actions</h3>
-                  <ul>
-                    {process.actions.map((step, idx) => (
-                      <li key={idx}>{step}</li>
-                    ))}
-                  </ul>
-                </section>
-              )}
+              {process.actions.length > 0 &&
+                (() => {
+                  // Admin-recorded progress, shown read-only. State is
+                  // announced in visible text ("Completed …"), never by
+                  // colour or a glyph alone; the tick mark is decorative.
+                  const completedCount = process.actions.filter(
+                    (step) => progress[step.id],
+                  ).length;
+                  const hasProgress = completedCount > 0;
+
+                  return (
+                    <section style={{ marginTop: "1.25rem" }}>
+                      <h3>Actions</h3>
+
+                      {hasProgress && (
+                        <p className="small">
+                          Your organisation has completed {completedCount} of{" "}
+                          {process.actions.length} steps, recorded by the
+                          Strategic Alliances Team.
+                        </p>
+                      )}
+
+                      <ul>
+                        {process.actions.map((step) => {
+                          const completedAt =
+                            progress[step.id]?.completedAt ?? null;
+                          const done = Boolean(progress[step.id]);
+
+                          return (
+                            <li key={step.id}>
+                              {step.body}
+                              {done && (
+                                <span className="small">
+                                  {" "}
+                                  <span aria-hidden="true">✓</span> Completed
+                                  {completedAt &&
+                                    ` ${new Intl.DateTimeFormat("en-GB", {
+                                      dateStyle: "medium",
+                                    }).format(completedAt)}`}
+                                </span>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  );
+                })()}
 
               {process.outcome && (
                 <section style={{ marginTop: "1.25rem" }}>

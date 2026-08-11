@@ -26,9 +26,16 @@ import type { Prisma, PrismaClient } from "@prisma/client";
  */
 export type BenefitCatalogueClient = PrismaClient | Prisma.TransactionClient;
 
+/** A process step with its stable BenefitAction.id, which is what the
+ * per-partner progress map keys on — the detail page joins the two. */
+export type CatalogueBenefitStep = {
+  id: number;
+  body: string;
+};
+
 export type CatalogueBenefitProcess = {
   trigger: string | null;
-  actions: string[];
+  actions: CatalogueBenefitStep[];
   outcome: string | null;
 };
 
@@ -84,7 +91,7 @@ export async function getBenefitCatalogue(
     orderBy: { sortOrder: "asc" },
     include: {
       tierMin: { select: { key: true, rank: true } },
-      actions: { orderBy: { position: "asc" }, select: { body: true } },
+      actions: { orderBy: { position: "asc" }, select: { id: true, body: true } },
     },
   });
 
@@ -99,7 +106,7 @@ export async function getBenefitCatalogue(
     supersedes: row.supersedesCodes,
     process: {
       trigger: row.trigger,
-      actions: row.actions.map((action) => action.body),
+      actions: row.actions,
       outcome: row.outcome,
     },
     terms: row.terms,
