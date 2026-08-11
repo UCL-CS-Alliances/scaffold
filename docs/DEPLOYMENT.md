@@ -68,7 +68,7 @@ Migrations in `prisma/migrations/` are the schema authority.
 2. Interleave your `UPDATE`/`DELETE` statements among the generated DDL. Let Prisma generate all DDL and copy its constraint names; only the data statements are yours. Order matters — backfill before adding `NOT NULL` or a unique index, so the constraint is only checked once the data can satisfy it.
 3. `npx prisma migrate dev` to apply locally and regenerate the client.
 
-Prisma runs each migration file in one transaction and PostgreSQL has transactional DDL, so a failed backfill rolls the whole file back. Point `DATABASE_URL` at a scratch database first: `--create-only` still provisions a shadow database on whatever it points at, which must never be the shared Supabase project.
+Prisma runs each migration file in one transaction and PostgreSQL has transactional DDL, so a failed backfill rolls the whole file back. Point `.env.local` at a scratch database first: `--create-only` still provisions a shadow database on whatever the CLI resolves, which must never be the shared Supabase project. Editing `.env.local` is the only way to retarget it — `prisma.config.ts` loads that file with `override: true`, so exporting `DATABASE_URL` on the command line is silently ignored.
 
 > **`User_primary_contact_per_organisation_key` is invisible to `schema.prisma`.** Prisma cannot express a partial unique index, so this one lives only in `20260804130100_add_primary_contact_unique_index`. Verified on Prisma 6.19.3 that this causes **no** drift — the differ ignores partial indexes rather than trying to drop what it cannot represent, and `migrate dev --create-only` against a database carrying it produces an empty migration. Worth re-checking after a major Prisma upgrade: if a generated migration ever contains `DROP INDEX "User_primary_contact_per_organisation_key"`, delete that line before applying.
 
@@ -89,7 +89,7 @@ The `Benefit` and `BenefitAction` tables hold the membership benefit catalogue. 
 npm run db:seed:benefits
 ```
 
-It writes `Benefit` and `BenefitAction` and nothing else. It never touches anything partner-scoped: no organisations, no memberships, and no `BenefitPartnerNote` rows. It reads `.env.local` then `.env` the same way the Prisma CLI does, preferring `DIRECT_URL`, but anything already exported wins — so `DATABASE_URL=… npm run db:seed:benefits` can target a scratch database without editing `.env.local`.
+It writes `Benefit` and `BenefitAction` and nothing else. It never touches anything partner-scoped: no organisations, no memberships, and no `BenefitPartnerNote` rows. It reads `.env.local` then `.env` and prefers `DIRECT_URL`, as the Prisma CLI does, but **unlike** the CLI it leaves an exported variable alone — so `DATABASE_URL=… npm run db:seed:benefits` targets a scratch database without editing `.env.local`. That trick does not work on `prisma migrate …`: `prisma.config.ts` loads `.env.local` with `override: true`, so the CLI goes wherever `.env.local` points no matter what you export. Retarget those by editing `.env.local`.
 
 Two properties worth relying on:
 
