@@ -16,6 +16,7 @@ import type { HandbookRenderResult } from "@/lib/handbook";
 import { hasBenefitAccess } from "@/lib/benefit-access";
 import { saveRedeemedBenefitsAction } from "@/lib/membership-dashboard-actions";
 import BenefitCatalogueEditor from "./BenefitCatalogueEditor";
+import BenefitPartnerNotes from "./BenefitPartnerNotes";
 
 type TabKey = "members" | "benefits" | "handbook";
 
@@ -85,6 +86,7 @@ export default function AdminDashboardClient(props: {
   tierOptions: MembershipTierOption[];
   benefitStats: AdminBenefitRedemptionStat[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
+  partnerNotes: Record<string, string>;
   initialTab?: string | null;
   handbook: HandbookRenderResult;
 }) {
@@ -97,6 +99,7 @@ export default function AdminDashboardClient(props: {
     tierOptions,
     benefitStats,
     benefitAuditTrail,
+    partnerNotes,
     initialTab,
     handbook,
   } = props;
@@ -660,6 +663,17 @@ export default function AdminDashboardClient(props: {
                   </button>
                   {isPending && <span className="small">Saving…</span>}
                 </div>
+
+                {selectedMember?.organisationId != null && (
+                  <div style={{ marginTop: "1.5rem" }}>
+                    <BenefitPartnerNotes
+                      organisationId={selectedMember.organisationId}
+                      organisationName={selectedMember.organisationName}
+                      benefits={benefits}
+                      notes={partnerNotes}
+                    />
+                  </div>
+                )}
 
                 <div style={{ marginTop: "1.5rem" }}>
                   <h4 style={{ marginBottom: ".5rem" }}>

@@ -21,7 +21,11 @@ import SignInForm from "@/components/SignInForm";
 import { pageCopy } from "@/content/pageCopy";
 import { userCanAccessApp } from "@/lib/access-control";
 import prisma from "@/lib/prisma";
-import { getBenefitCatalogue, getBenefitCatalogueForEditor } from "@/lib/benefits";
+import {
+  getBenefitCatalogue,
+  getBenefitCatalogueForEditor,
+  getBenefitPartnerNotesForOrganisation,
+} from "@/lib/benefits";
 
 type Props = {
   searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -122,6 +126,15 @@ export default async function MembershipDashboardPage(props: Props) {
       ? await getAdminBenefitAuditTrail(selectedMember.organisationId)
       : [];
 
+    // Same shape for the partner's benefit notes: organisation-scoped, so
+    // resolvable only once a member is selected.
+    const partnerNotes = selectedMember?.organisationId
+      ? await getBenefitPartnerNotesForOrganisation(
+          prisma,
+          selectedMember.organisationId,
+        )
+      : {};
+
     const payingRevenue = computeRevenueFromTiers(summary.tiers);
 
     const top = benefitStats
@@ -156,6 +169,7 @@ export default async function MembershipDashboardPage(props: Props) {
         tierOptions={tierOptions}
         benefitStats={benefitStats}
         benefitAuditTrail={benefitAuditTrail}
+        partnerNotes={partnerNotes}
         initialTab={tab}
         handbook={handbook}
       />

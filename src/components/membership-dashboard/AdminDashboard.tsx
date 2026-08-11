@@ -28,6 +28,7 @@ type AdminDashboardProps = AdminDashboardSummary & {
   tierOptions: MembershipTierOption[];
   benefitStats: AdminBenefitRedemptionStat[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
+  partnerNotes: Record<string, string>;
 
   initialTab?: string | null;
   handbook: HandbookRenderResult;
@@ -56,6 +57,7 @@ export default function AdminDashboard({
   tierOptions,
   benefitStats,
   benefitAuditTrail,
+  partnerNotes,
   initialTab = null,
   handbook,
 }: AdminDashboardProps) {
@@ -88,6 +90,7 @@ export default function AdminDashboard({
           tierOptions={tierOptions}
           benefitStats={benefitStats}
           benefitAuditTrail={benefitAuditTrail}
+          partnerNotes={partnerNotes}
           initialTab={initialTab}
           handbook={handbook}
         />
