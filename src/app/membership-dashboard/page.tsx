@@ -87,6 +87,10 @@ export default async function MembershipDashboardPage(props: Props) {
     const tab = pickFirst(sp?.tab) ?? null; // "members" | "benefits" | "handbook"
     const chapter = pickFirst(sp?.chapter) ?? null;
 
+    // Resolved before the batch because the redemption stats are computed from
+    // it; the client component receives the same list.
+    const benefits = await getBenefitCatalogue(prisma);
+
     const [summary, members, selectedMember, benefitStats, handbook, totalUsers] =
       await Promise.all([
         getAdminDashboardSummary(),
@@ -94,7 +98,7 @@ export default async function MembershipDashboardPage(props: Props) {
         selectedUserId
           ? getAdminSelectedMember(selectedUserId)
           : Promise.resolve(null),
-        getAdminBenefitRedemptionStats(),
+        getAdminBenefitRedemptionStats(benefits),
         renderHandbookChapterBySlug(chapter ?? undefined),
         prisma.user.count(),
       ]);
@@ -117,8 +121,6 @@ export default async function MembershipDashboardPage(props: Props) {
         if (bp !== ap) return bp - ap;
         return b.redeemed - a.redeemed;
       })[0];
-
-    const benefits = await getBenefitCatalogue(prisma);
 
     const topBenefitLabel =
       top

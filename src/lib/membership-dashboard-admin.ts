@@ -1,6 +1,6 @@
 // src/lib/membership-dashboard-admin.ts
 import { prisma } from "@/lib/prisma";
-import { getBenefitCatalogue } from "@/lib/benefits";
+import type { CatalogueBenefit } from "@/lib/benefits";
 import { hasBenefitAccess } from "@/lib/benefit-access";
 import {
   getMembershipForOrganisation,
@@ -247,11 +247,14 @@ export type AdminBenefitRedemptionStat = {
   percent: number | null; // null when eligible=0
 };
 
-export async function getAdminBenefitRedemptionStats(): Promise<AdminBenefitRedemptionStat[]> {
+// The catalogue is passed in rather than resolved here, as the eligibility
+// rules take it: the page already needs it for the client component, so
+// resolving it once and threading it through keeps it to a single query.
+export async function getAdminBenefitRedemptionStats(
+  benefits: CatalogueBenefit[],
+): Promise<AdminBenefitRedemptionStat[]> {
   // Fetch the active MEMBER role id (consistent with your other admin summary logic)
   const memberRole = await prisma.role.findUnique({ where: { key: "MEMBER" } });
-
-  const benefits = await getBenefitCatalogue(prisma);
 
   // The unit here is the organisation, not the contact: eligibility and
   // redemption both belong to the partner, so a company with three people is
