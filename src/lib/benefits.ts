@@ -193,6 +193,35 @@ export async function getBenefitPartnerNotesForOrganisation(
   return Object.fromEntries(rows.map((row) => [row.benefit.code, row.body]));
 }
 
+/** Presence of a key means the step is complete; the value records when.
+ * completedAt is nullable in the schema as headroom, but the save action
+ * always stamps it, so expect a Date in practice. */
+export type BenefitActionProgressMap = Record<
+  number,
+  { completedAt: Date | null }
+>;
+
+/**
+ * One partner's per-step benefit progress, keyed by BenefitAction.id — one
+ * query for the whole map (phase E). Admin-written via
+ * saveBenefitActionProgressAction, member-read on the benefit detail page.
+ * Progress is the organisation's, like redemption and notes, and never
+ * implies redemption: only saveRedeemedBenefitsAction writes that.
+ */
+export async function getBenefitActionProgressForOrganisation(
+  client: BenefitCatalogueClient,
+  organisationId: number,
+): Promise<BenefitActionProgressMap> {
+  const rows = await client.benefitActionProgress.findMany({
+    where: { organisationId },
+    select: { benefitActionId: true, completedAt: true },
+  });
+
+  return Object.fromEntries(
+    rows.map((row) => [row.benefitActionId, { completedAt: row.completedAt }]),
+  );
+}
+
 /**
  * Every benefit code the catalogue knows about, retired ones included.
  *

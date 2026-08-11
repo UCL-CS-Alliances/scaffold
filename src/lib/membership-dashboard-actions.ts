@@ -218,3 +218,108 @@ export async function saveBenefitPartnerNoteAction(input: {
     });
   });
 }
+
+/**
+ * Save one partner's step progress for one benefit (phase E): the whole set
+ * of ticked step ids in a single call, mirroring saveRedeemedBenefitsAction,
+ * so the audit row carries added/removed rather than one row per click.
+ *
+ * Admin ticks, members read. This must never touch redemption state —
+ * whether a fully ticked process implies delivery is an open question that
+ * belongs to the redemption epic, and is deliberately not assumed here.
+ */
+export async function saveBenefitActionProgressAction(input: {
+  organisationId: number;
+  benefitCode: string;
+  completedActionIds: number[];
+}) {
+  const session = await getServerAuthSession();
+  // Cast via a narrow shape rather than `any`, so the tracked no-explicit-any
+  // lint baseline does not grow.
+  const user = session?.user as { roleKeys?: unknown } | undefined;
+  requireAdmin(user?.roleKeys);
+
+  const actorId = session?.user?.id ?? null;
+  const actorEmail = session?.user?.email ?? null;
+
+  const organisationId = input.organisationId;
+  const submitted = [...new Set((input.completedActionIds ?? []).map(Number))];
+
+  await prisma.$transaction(async (tx) => {
+    const benefit = await tx.benefit.findUnique({
+      where: { code: input.benefitCode },
+      select: {
+        id: true,
+        code: true,
+        actions: { select: { id: true } },
+      },
+    });
+    if (!benefit) throw new Error(`Unknown benefit code: ${input.benefitCode}`);
+
+    const organisation = await tx.organisation.findUnique({
+      where: { id: organisationId },
+      select: { id: true },
+    });
+    if (!organisation) throw new Error("Organisation not found.");
+
+    // Every submitted id must be a step of this benefit: a stale editor
+    // (a colleague deleted a step meanwhile) fails loudly rather than
+    // recording progress against another benefit's steps.
+    const stepIds = new Set(benefit.actions.map((a) => a.id));
+    for (const id of submitted) {
+      if (!stepIds.has(id)) {
+        throw new Error(
+          "A submitted step no longer exists — reload and try again.",
+        );
+      }
+    }
+
+    // Scoped to this benefit's steps so one benefit's save cannot disturb
+    // progress recorded on another.
+    const existing = await tx.benefitActionProgress.findMany({
+      where: { organisationId, benefitActionId: { in: [...stepIds] } },
+      select: { benefitActionId: true },
+    });
+
+    const existingIds = new Set(existing.map((r) => r.benefitActionId));
+    const submittedIds = new Set(submitted);
+    const added = submitted.filter((id) => !existingIds.has(id));
+    const removed = [...existingIds].filter((id) => !submittedIds.has(id));
+
+    // No-op saves write nothing and are not audited.
+    if (added.length === 0 && removed.length === 0) return;
+
+    if (added.length > 0) {
+      await tx.benefitActionProgress.createMany({
+        data: added.map((benefitActionId) => ({
+          organisationId,
+          benefitActionId,
+          completedAt: new Date(),
+          completedById: actorId,
+        })),
+      });
+    }
+
+    if (removed.length > 0) {
+      // Untick deletes the row — presence means complete, and the table
+      // stays as sparse as notes and redemption.
+      await tx.benefitActionProgress.deleteMany({
+        where: { organisationId, benefitActionId: { in: removed } },
+      });
+    }
+
+    await recordAuditLog(tx, {
+      entityType: "OrganisationBenefitActionProgress",
+      entityId: String(organisationId),
+      action: "UPDATE",
+      actorId,
+      data: {
+        organisationId,
+        benefitCode: benefit.code,
+        actorEmail,
+        added,
+        removed,
+      },
+    });
+  });
+}
