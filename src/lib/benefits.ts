@@ -106,6 +106,71 @@ export async function getBenefitCatalogue(
   }));
 }
 
+export type EditorBenefitStep = {
+  /** BenefitAction.id — the stable handle the reorder/delete actions take,
+   * and what phase E's progress rows point at. */
+  id: number;
+  position: number;
+  body: string;
+};
+
+export type EditorBenefit = {
+  /** Benefit.id — what the catalogue server actions key on. Distinct from
+   * CatalogueBenefit.id, which is the code. */
+  benefitId: number;
+  code: string;
+  label: string;
+  description: string;
+  category: string;
+  tierMinId: number;
+  tierMinLabel: string;
+  trigger: string | null;
+  outcome: string | null;
+  terms: string[];
+  supersedesCodes: string[];
+  isActive: boolean;
+  steps: EditorBenefitStep[];
+};
+
+/**
+ * The catalogue as the admin editor needs it: retired benefits included
+ * (restoring one requires seeing it), database ids surfaced (the edit actions
+ * key on Benefit.id and BenefitAction.id, not on the code), and steps carried
+ * as rows rather than flattened to strings. Member-facing reads should use
+ * getBenefitCatalogue; this shape exists so the editor does not have to
+ * overload it.
+ */
+export async function getBenefitCatalogueForEditor(
+  client: BenefitCatalogueClient,
+): Promise<EditorBenefit[]> {
+  const rows = await client.benefit.findMany({
+    orderBy: { sortOrder: "asc" },
+    include: {
+      tierMin: { select: { id: true, label: true } },
+      actions: {
+        orderBy: { position: "asc" },
+        select: { id: true, position: true, body: true },
+      },
+    },
+  });
+
+  return rows.map((row) => ({
+    benefitId: row.id,
+    code: row.code,
+    label: row.label,
+    description: row.description,
+    category: row.category,
+    tierMinId: row.tierMin.id,
+    tierMinLabel: row.tierMin.label,
+    trigger: row.trigger,
+    outcome: row.outcome,
+    terms: row.terms,
+    supersedesCodes: row.supersedesCodes,
+    isActive: row.isActive,
+    steps: row.actions,
+  }));
+}
+
 /**
  * Every benefit code the catalogue knows about, retired ones included.
  *

@@ -240,6 +240,23 @@ export async function getAdminBenefitAuditTrail(
   });
 }
 
+export type MembershipTierOption = {
+  id: number;
+  key: string;
+  label: string;
+  rank: number;
+};
+
+// The catalogue editor's tier select. Options come from the database rather
+// than a hardcoded list, so a tier added to MembershipTier needs no code
+// change here (the same property benefit eligibility already has).
+export async function getMembershipTierOptions(): Promise<MembershipTierOption[]> {
+  return prisma.membershipTier.findMany({
+    select: { id: true, key: true, label: true, rank: true },
+    orderBy: { rank: "asc" },
+  });
+}
+
 export type AdminBenefitRedemptionStat = {
   benefitId: string;
   eligible: number;

@@ -4,21 +4,33 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { CatalogueBenefit } from "@/lib/benefits";
+import type { CatalogueBenefit, EditorBenefit } from "@/lib/benefits";
 import type {
   AdminBenefitAuditEntry,
   AdminBenefitRedemptionStat,
   AdminMemberListItem,
   AdminSelectedMember,
+  MembershipTierOption,
 } from "@/lib/membership-dashboard-admin";
 import type { HandbookRenderResult } from "@/lib/handbook";
 import { hasBenefitAccess } from "@/lib/benefit-access";
 import { saveRedeemedBenefitsAction } from "@/lib/membership-dashboard-actions";
+import BenefitCatalogueEditor from "./BenefitCatalogueEditor";
 
 type TabKey = "members" | "benefits" | "handbook";
 
 function asTabKey(v: string | null | undefined): TabKey | null {
   if (v === "members" || v === "benefits" || v === "handbook") return v;
+  return null;
+}
+
+// The benefits tab's no-selection view: redemption stats by default, with the
+// catalogue editor as a deliberate ?view= destination (same guard style as
+// asTabKey; talent-discovery's ?view= is the precedent).
+type BenefitsViewKey = "stats" | "editor";
+
+function asBenefitsViewKey(v: string | null | undefined): BenefitsViewKey | null {
+  if (v === "stats" || v === "editor") return v;
   return null;
 }
 
@@ -69,6 +81,8 @@ export default function AdminDashboardClient(props: {
   selectedUserId: string | null;
   selectedMember: AdminSelectedMember | null;
   benefits: CatalogueBenefit[];
+  editorBenefits: EditorBenefit[];
+  tierOptions: MembershipTierOption[];
   benefitStats: AdminBenefitRedemptionStat[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
   initialTab?: string | null;
@@ -79,6 +93,8 @@ export default function AdminDashboardClient(props: {
     selectedUserId,
     selectedMember,
     benefits,
+    editorBenefits,
+    tierOptions,
     benefitStats,
     benefitAuditTrail,
     initialTab,
@@ -110,6 +126,29 @@ export default function AdminDashboardClient(props: {
     if (next && next !== activeTab) setActiveTab(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp]);
+
+  // Stats are the default; the editor is opted into via ?view=editor so an
+  // admin never lands on live-editing forms by accident.
+  const [benefitsView, setBenefitsView] = useState<BenefitsViewKey>(
+    asBenefitsViewKey(sp?.get("view")) ?? "stats",
+  );
+
+  useEffect(() => {
+    const next = asBenefitsViewKey(sp?.get("view")) ?? "stats";
+    if (next !== benefitsView) setBenefitsView(next);
+  }, [sp, benefitsView]);
+
+  function changeBenefitsView(next: BenefitsViewKey) {
+    setBenefitsView(next);
+    const params = new URLSearchParams(sp?.toString());
+    if (next === "stats") params.delete("view");
+    else params.set("view", next);
+
+    startTransition(() => {
+      pushWithParams(params);
+      router.refresh();
+    });
+  }
 
   const hasSelection = Boolean(selectedUserId && selectedMember);
 
@@ -460,8 +499,37 @@ export default function AdminDashboardClient(props: {
           >
             {!hasSelection ? (
               <>
-                <h3 style={{ marginTop: 0 }}>Benefits overview</h3>
+                <h3 style={{ marginTop: 0 }}>
+                  {benefitsView === "editor"
+                    ? "Benefit catalogue editor"
+                    : "Benefits overview"}
+                </h3>
 
+                <div className="cluster" style={{ marginBottom: ".75rem" }}>
+                  <button
+                    type="button"
+                    className={`tab ${benefitsView === "stats" ? "is-active" : ""}`}
+                    aria-pressed={benefitsView === "stats"}
+                    onClick={() => changeBenefitsView("stats")}
+                  >
+                    Redemption stats
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab ${benefitsView === "editor" ? "is-active" : ""}`}
+                    aria-pressed={benefitsView === "editor"}
+                    onClick={() => changeBenefitsView("editor")}
+                  >
+                    Edit catalogue
+                  </button>
+                </div>
+
+                {benefitsView === "editor" ? (
+                  <BenefitCatalogueEditor
+                    benefits={editorBenefits}
+                    tierOptions={tierOptions}
+                  />
+                ) : (
                 <div className="table-wrap">
                   <table className="table">
                     <thead>
@@ -497,6 +565,7 @@ export default function AdminDashboardClient(props: {
                     </tbody>
                   </table>
                 </div>
+                )}
               </>
             ) : (
               <>

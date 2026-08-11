@@ -12,6 +12,7 @@ import {
   getAdminBenefitRedemptionStats,
   getAdminMemberList,
   getAdminSelectedMember,
+  getMembershipTierOptions,
 } from "@/lib/membership-dashboard-admin";
 import { renderHandbookChapterBySlug } from "@/lib/handbook";
 import AdminDashboard from "@/components/membership-dashboard/AdminDashboard";
@@ -20,7 +21,7 @@ import SignInForm from "@/components/SignInForm";
 import { pageCopy } from "@/content/pageCopy";
 import { userCanAccessApp } from "@/lib/access-control";
 import prisma from "@/lib/prisma";
-import { getBenefitCatalogue } from "@/lib/benefits";
+import { getBenefitCatalogue, getBenefitCatalogueForEditor } from "@/lib/benefits";
 
 type Props = {
   searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -91,17 +92,29 @@ export default async function MembershipDashboardPage(props: Props) {
     // it; the client component receives the same list.
     const benefits = await getBenefitCatalogue(prisma);
 
-    const [summary, members, selectedMember, benefitStats, handbook, totalUsers] =
-      await Promise.all([
-        getAdminDashboardSummary(),
-        getAdminMemberList(),
-        selectedUserId
-          ? getAdminSelectedMember(selectedUserId)
-          : Promise.resolve(null),
-        getAdminBenefitRedemptionStats(benefits),
-        renderHandbookChapterBySlug(chapter ?? undefined),
-        prisma.user.count(),
-      ]);
+    const [
+      summary,
+      members,
+      selectedMember,
+      benefitStats,
+      handbook,
+      totalUsers,
+      editorBenefits,
+      tierOptions,
+    ] = await Promise.all([
+      getAdminDashboardSummary(),
+      getAdminMemberList(),
+      selectedUserId
+        ? getAdminSelectedMember(selectedUserId)
+        : Promise.resolve(null),
+      getAdminBenefitRedemptionStats(benefits),
+      renderHandbookChapterBySlug(chapter ?? undefined),
+      prisma.user.count(),
+      // The editor's own shape: retired benefits included, database ids and
+      // step rows surfaced. Member-facing consumers keep the list above.
+      getBenefitCatalogueForEditor(prisma),
+      getMembershipTierOptions(),
+    ]);
 
     // The trail belongs to the organisation, so it needs the selected member's
     // organisation and cannot join the batch above.
@@ -139,6 +152,8 @@ export default async function MembershipDashboardPage(props: Props) {
         selectedUserId={selectedUserId}
         selectedMember={selectedMember}
         benefits={benefits}
+        editorBenefits={editorBenefits}
+        tierOptions={tierOptions}
         benefitStats={benefitStats}
         benefitAuditTrail={benefitAuditTrail}
         initialTab={tab}
