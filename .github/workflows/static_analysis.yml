@@ -57,11 +57,13 @@ jobs:
       # The benefit catalogue seeder also runs inside `db:seed`, but it is the
       # standalone path that gets pointed at a shared database (the main seed
       # would rewrite live partner records), so prove that one is repeat-safe
-      # in its own right.
+      # in its own right. --force because the standalone entry refuses to run
+      # without it: the seeder is a hard re-baseline that discards admin
+      # catalogue edits.
       - name: Seed the benefit catalogue standalone
         run: |
-          npm run db:seed:benefits
-          npm run db:seed:benefits
+          npm run db:seed:benefits -- --force
+          npm run db:seed:benefits -- --force
 
       - name: Typecheck
         run: npm run typecheck

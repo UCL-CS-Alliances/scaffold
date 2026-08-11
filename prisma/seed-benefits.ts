@@ -16,12 +16,16 @@ import { BENEFITS } from './fixtures/benefits';
 // (`npm run db:seed:benefits`), because the main seed also upserts
 // organisations, users and memberships from members.yml — running that against
 // a live database would rewrite real partner records. This script touches
-// reference data only, and never anything partner-scoped, so it is safe to run
-// wherever the catalogue needs populating.
+// reference data only, and never anything partner-scoped.
 //
-// Note it is a *content re-baseline*: the fixture wins for every code it knows
-// about. Once benefits are editable through the admin UI, running this reverts
-// those edits.
+// It is a *hard re-baseline*, not an additive seed: the fixture wins
+// completely. Every fixture benefit is overwritten with isActive forced back
+// to true, and any benefit the fixture does not define — i.e. one created
+// through the admin UI — is retired, never deleted. Deleting would cascade
+// its action steps, partner notes and tracker progress rows, and leave any
+// redeemed code nothing can resolve. Because that destroys admin catalogue
+// edits, the standalone entry point refuses to run without --force
+// (`npm run db:seed:benefits -- --force`).
 //
 
 /**
@@ -103,12 +107,11 @@ export async function seedBenefits(prisma: PrismaClient) {
       terms: benefit.terms ?? [],
       supersedesCodes: benefit.supersedes ?? [],
       sortOrder: index,
+      // The re-baseline un-retires: a fixture benefit an admin retired comes
+      // back, because the fixture says it exists and is live.
+      isActive: true,
     };
 
-    // Upsert rather than replace: a benefit added through the admin UI is not
-    // in the fixture and must survive a reseed, so nothing is ever pruned.
-    // isActive is absent from `fields` on purpose — it defaults to true on
-    // create, and a benefit retired by an admin stays retired.
     const row = await prisma.benefit.upsert({
       where: { code: benefit.id },
       create: { code: benefit.id, ...fields },
@@ -126,6 +129,22 @@ export async function seedBenefits(prisma: PrismaClient) {
     );
   }
 
+  // The other half of the re-baseline: anything the fixture does not define
+  // was created through the admin UI, and gets retired — never deleted, which
+  // would cascade steps, notes and progress and dangle redeemed codes. The
+  // isActive filter keeps a second consecutive run a no-op.
+  const retired = await prisma.benefit.updateMany({
+    where: {
+      code: { notIn: BENEFITS.map((b) => b.id) },
+      isActive: true,
+    },
+    data: { isActive: false },
+  });
+
+  if (retired.count > 0) {
+    console.log(`  - retired ${retired.count} benefit(s) not in the fixture`);
+  }
+
   console.log(`Benefit catalogue seeded (${BENEFITS.length} benefits).`);
 }
 
@@ -136,19 +155,51 @@ const isDirectRun =
   import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isDirectRun) {
+  // A destructive reset guarded only by documentation is how the wipe
+  // happens: this command's name still says "seed" while its semantics are
+  // "reset to fixture", and the runbook points it at the shared database. The
+  // guard lives here, in the standalone entry, and deliberately not around
+  // seedBenefits itself — prisma/seed.ts calls that on databases where the
+  // main seed is already forbidden for stronger reasons. A flag rather than a
+  // prompt so CI (which runs this twice, non-interactively) exercises the
+  // same code path an operator does.
+  if (!process.argv.includes('--force')) {
+    console.error(
+      [
+        'db:seed:benefits is a hard re-baseline, not an additive seed.',
+        'It resets the catalogue to prisma/fixtures/benefits.ts:',
+        '  - every fixture benefit is overwritten, discarding admin edits',
+        '  - retired fixture benefits are re-activated',
+        '  - benefits created through the admin UI are retired',
+        'Nothing partner-scoped is touched (no redemptions, notes or progress).',
+        '',
+        'To proceed: npm run db:seed:benefits -- --force',
+      ].join('\n'),
+    );
+    process.exit(1);
+  }
+
   // Run directly under tsx rather than through the Prisma CLI, so the env
   // files prisma.config.ts loads are not loaded for us. Same files, in
   // precedence order: anything already exported wins — which is how you point
   // the seeder at a scratch database without editing .env.local — then
   // .env.local, then .env. Note this is the opposite of prisma.config.ts, which
   // loads .env.local with `override: true` and so discards what is exported.
+  //
+  // The exported pair is captured *before* dotenv fills the gaps, because an
+  // exported URL must beat both file URLs, not just the one sharing its name.
+  // Without this, exporting DATABASE_URL alone loses to .env.local's
+  // DIRECT_URL — which silently sends a "scratch database" run to whatever
+  // .env.local points at, i.e. the shared database.
+  const exportedUrl = process.env.DIRECT_URL || process.env.DATABASE_URL;
+
   config({ path: '.env.local', quiet: true });
   config({ path: '.env', quiet: true });
 
   // Prefer the direct/session connection for bulk writes, as the CLI does.
   // `||` rather than `??`: a blank `DIRECT_URL=` in an env file is a string, so
   // `??` would keep it and refuse to run against a perfectly good DATABASE_URL.
-  const url = process.env.DIRECT_URL || process.env.DATABASE_URL;
+  const url = exportedUrl || process.env.DIRECT_URL || process.env.DATABASE_URL;
 
   if (!url) {
     throw new Error(
