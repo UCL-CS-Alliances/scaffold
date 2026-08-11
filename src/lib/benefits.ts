@@ -2,12 +2,12 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 /**
- * The benefit catalogue used to be a TypeScript literal in
- * src/content/benefits.ts, so every consumer imported the same array and read
- * its fields directly. It is database-backed now, and this module owns that
- * resolution — read the catalogue through it rather than querying
+ * The benefit catalogue used to be a TypeScript literal that every consumer
+ * imported and read directly. It is database-backed now, and this module owns
+ * that resolution — read the catalogue through it rather than querying
  * prisma.benefit at a call site, so the query, the ordering and the shape stay
- * in one place.
+ * in one place. The old literal survives as the seed fixture at
+ * prisma/fixtures/benefits.ts, which only the seeder reads.
  *
  * The returned shape is hand-written rather than a Prisma model type, for the
  * same reason membership.ts does it: schema changes stay inside this module.

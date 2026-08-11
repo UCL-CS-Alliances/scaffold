@@ -185,9 +185,10 @@ model MembershipDashboardMember {
 
 // BENEFIT CATALOGUE
 // -----------------
-// The catalogue was content-as-code in src/content/benefits.ts. It lives here
-// so the Strategic Alliances Team can edit it without a deploy, and so notes
-// and per-action progress can hang off a benefit.
+// The catalogue was content-as-code. It lives here so the Strategic Alliances
+// Team can edit it without a deploy, and so notes and per-action progress can
+// hang off a benefit. Its starting set is the seed fixture in
+// prisma/fixtures/benefits.ts.
 
 model Benefit {
   id   Int    @id @default(autoincrement())

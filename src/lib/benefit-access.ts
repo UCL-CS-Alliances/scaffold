@@ -1,9 +1,4 @@
 // src/lib/benefit-access.ts
-import {
-  MEMBERSHIP_TIER_RANK,
-  type MembershipTierKey,
-} from "@/content/benefits";
-
 /**
  * Single source of truth for "which benefits can this member see and use".
  *
@@ -33,8 +28,26 @@ export type EligibilityBenefit = {
   supersedes?: readonly string[];
 };
 
+/**
+ * The four tiers the platform ships with, and their ranks.
+ *
+ * MembershipTier is the authority on this — benefit eligibility reads ranks
+ * straight from the database and never consults this table. It exists only for
+ * resolveMemberRank's fallback below, where a caller has a tier key but no
+ * rank, and it is why that fallback cannot resolve a tier added after this was
+ * written.
+ */
+type MembershipTierKey = "bronze" | "silver" | "gold" | "platinum";
+
+const MEMBERSHIP_TIER_RANK: Record<MembershipTierKey, number> = {
+  bronze: 1,
+  silver: 2,
+  gold: 3,
+  platinum: 4,
+};
+
 // Tier keys arrive from the database as free-form strings (MembershipTier.key),
-// so they are normalised to the content-side union before use.
+// so they are normalised to the known set before use.
 export function normaliseTierKey(key: string | null): MembershipTierKey | null {
   if (!key) return null;
   const lower = key.toLowerCase() as MembershipTierKey;

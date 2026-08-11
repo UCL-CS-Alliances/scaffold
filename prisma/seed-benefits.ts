@@ -2,15 +2,17 @@
 import { PrismaClient } from '@prisma/client';
 import { config } from 'dotenv';
 import { pathToFileURL } from 'url';
-import { BENEFITS } from '../src/content/benefits';
+import { BENEFITS } from './fixtures/benefits';
 
 //
 // ─────────────────────────────────────────────────────────────
 //   Benefit catalogue seed
 // ─────────────────────────────────────────────────────────────
 //
-// Seeds the Benefit and BenefitAction tables from the content-as-code
-// catalogue. Deliberately separate from prisma/seed.ts and runnable on its own
+// Seeds the Benefit and BenefitAction tables from the fixture in
+// fixtures/benefits.ts, which the application no longer reads — the catalogue
+// is resolved from the database by src/lib/benefits.ts, and this is only its
+// starting set. Deliberately separate from prisma/seed.ts and runnable on its own
 // (`npm run db:seed:benefits`), because the main seed also upserts
 // organisations, users and memberships from members.yml — running that against
 // a live database would rewrite real partner records. This script touches

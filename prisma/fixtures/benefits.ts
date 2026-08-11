@@ -1,13 +1,16 @@
-// src/content/benefits.ts
+// prisma/fixtures/benefits.ts
+//
+// Seed fixture for the benefit catalogue, not application content. The app
+// reads benefits from the database via src/lib/benefits.ts; this is the
+// starting set that prisma/seed-benefits.ts writes there, and the only thing
+// that imports it is that seeder.
+//
+// It stays TypeScript rather than YAML so the fixture is type-checked, and it
+// keeps its own strict BenefitId union: codes are free-form strings in the
+// application now that benefits can be added through the admin UI, but the
+// seeded set is fixed and worth typing.
 
 export type MembershipTierKey = "bronze" | "silver" | "gold" | "platinum";
-
-export const MEMBERSHIP_TIER_RANK: Record<MembershipTierKey, number> = {
-  bronze: 1,
-  silver: 2,
-  gold: 3,
-  platinum: 4,
-};
 
 export type BenefitId =
   | "B01"
