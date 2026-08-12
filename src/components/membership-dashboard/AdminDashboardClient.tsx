@@ -162,12 +162,16 @@ export default function AdminDashboardClient(props: {
 
     startTransition(() => {
       pushWithParams(params);
-      router.refresh();
     });
   }
 
   const hasSelection = Boolean(selectedUserId && selectedMember);
 
+  // No router.refresh() alongside this: the page is force-dynamic, so the
+  // replace already fetches a fresh server render. A refresh would run a second
+  // full render concurrently — on the pooled connection_limit=1 database every
+  // query serialises, and the doubled queue is enough to hit Prisma's pool
+  // timeout, which is what made selecting a partner hang or fail to load.
   function pushWithParams(nextParams: URLSearchParams) {
     router.replace(`/membership-dashboard?${nextParams.toString()}`);
   }
@@ -179,7 +183,6 @@ export default function AdminDashboardClient(props: {
 
     startTransition(() => {
       pushWithParams(params);
-      router.refresh();
     });
   }
 
@@ -195,7 +198,6 @@ export default function AdminDashboardClient(props: {
 
     startTransition(() => {
       pushWithParams(params);
-      router.refresh();
     });
   }
 
