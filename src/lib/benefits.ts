@@ -215,8 +215,9 @@ export type BenefitActionProgressMap = Record<
  * One partner's per-step benefit progress, keyed by BenefitAction.id — one
  * query for the whole map (phase E). Admin-written via
  * saveBenefitActionProgressAction, member-read on the benefit detail page.
- * Progress is the organisation's, like redemption and notes, and never
- * implies redemption: only saveRedeemedBenefitsAction writes that.
+ * Progress is the organisation's, like redemption and notes — and for a
+ * stepped benefit, redemption is *derived* from it (2026-08-12): all steps
+ * complete ⟺ redeemed, kept true by the save action.
  */
 export async function getBenefitActionProgressForOrganisation(
   client: BenefitCatalogueClient,

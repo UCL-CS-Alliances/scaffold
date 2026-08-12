@@ -17,11 +17,9 @@ import type {
   MembershipTierOption,
 } from "@/lib/membership-dashboard-admin";
 import type { HandbookRenderResult } from "@/lib/handbook";
-import { hasBenefitAccess } from "@/lib/benefit-access";
-import { saveRedeemedBenefitsAction } from "@/lib/membership-dashboard-actions";
 import BenefitCatalogueEditor from "./BenefitCatalogueEditor";
 import BenefitPartnerNotes from "./BenefitPartnerNotes";
-import BenefitProgressTracker from "./BenefitProgressTracker";
+import BenefitRedemptionChecklist from "./BenefitRedemptionChecklist";
 
 type TabKey = "members" | "benefits" | "handbook";
 
@@ -115,7 +113,9 @@ export default function AdminDashboardClient(props: {
 
   const router = useRouter();
   const sp = useSearchParams();
-  const [isPending, startTransition] = useTransition();
+  // Only the trigger is needed now: per-benefit saves own their pending state
+  // inside BenefitRedemptionChecklist.
+  const [, startTransition] = useTransition();
 
   const tocSlug = handbook.chapters[0]?.slug ?? "table-of-contents";
 
@@ -277,31 +277,6 @@ export default function AdminDashboardClient(props: {
     benefitStats.forEach((s) => m.set(s.benefitId, s));
     return m;
   }, [benefitStats]);
-
-  const [draftRedeemed, setDraftRedeemed] = useState<Set<string>>(
-    new Set((selectedMember?.redeemedBenefitCodes ?? []) as string[]),
-  );
-
-  useEffect(() => {
-    setDraftRedeemed(
-      new Set((selectedMember?.redeemedBenefitCodes ?? []) as string[]),
-    );
-  }, [selectedUserId, selectedMember]);
-
-  async function saveBenefits() {
-    const organisationId = selectedMember?.organisationId;
-    if (organisationId == null) return;
-
-    const redeemedBenefitCodes = Array.from(draftRedeemed);
-
-    startTransition(async () => {
-      await saveRedeemedBenefitsAction({
-        organisationId,
-        redeemedBenefitCodes,
-      });
-      router.refresh();
-    });
-  }
 
   function handbookHref(chapterSlug: string) {
     const params = new URLSearchParams(sp?.toString());
@@ -584,105 +559,15 @@ export default function AdminDashboardClient(props: {
               <>
                 <h3 style={{ marginTop: 0 }}>Benefit redemption checklist</h3>
 
-                <p className="small" style={{ marginTop: ".25rem" }}>
-                  Benefits are recorded for{" "}
-                  <strong>
-                    {selectedMember?.organisationName ?? "the organisation"}
-                  </strong>{" "}
-                  as a whole, not for an individual contact. Every contact there
-                  sees the same redemption state.
-                </p>
-
-                <ul className="list-plain" style={{ marginTop: ".75rem" }}>
-                  {benefits.map((b) => {
-                    const included = hasBenefitAccess(
-                      selectedMember?.membershipTierRank ?? null,
-                      b.tierMinRank,
-                    );
-                    const checked = draftRedeemed.has(b.id);
-
-                    if (!included) {
-                      return (
-                        <li
-                          key={b.id}
-                          className="tile"
-                          style={{
-                            padding: ".5rem .75rem",
-                            marginBottom: ".5rem",
-                          }}
-                        >
-                          <span role="img" aria-label="Locked">
-                            🔒
-                          </span>{" "}
-                          <strong>{b.label}</strong>
-                        </li>
-                      );
-                    }
-
-                    return (
-                      <li
-                        key={b.id}
-                        className="tile"
-                        style={{
-                          padding: ".5rem .75rem",
-                          marginBottom: ".5rem",
-                        }}
-                      >
-                        <label
-                          style={{
-                            display: "flex",
-                            gap: ".5rem",
-                            alignItems: "flex-start",
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) => {
-                              const next = new Set(draftRedeemed);
-                              if (e.target.checked) next.add(b.id);
-                              else next.delete(b.id);
-                              setDraftRedeemed(next);
-                            }}
-                          />
-                          <span>
-                            <strong>{b.label}</strong>
-                          </span>
-                        </label>
-                      </li>
-                    );
-                  })}
-                </ul>
-
-                <div
-                  style={{
-                    display: "flex",
-                    gap: ".75rem",
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="button-link"
-                    onClick={saveBenefits}
-                    disabled={isPending}
-                    aria-disabled={isPending ? "true" : undefined}
-                  >
-                    Save changes
-                  </button>
-                  {isPending && <span className="small">Saving…</span>}
-                </div>
-
                 {selectedMember?.organisationId != null && (
-                  <div style={{ marginTop: "1.5rem" }}>
-                    <BenefitProgressTracker
-                      organisationId={selectedMember.organisationId}
-                      benefits={editorBenefits}
-                      progress={partnerProgress}
-                      memberRank={selectedMember.membershipTierRank}
-                    />
-                  </div>
+                  <BenefitRedemptionChecklist
+                    organisationId={selectedMember.organisationId}
+                    organisationName={selectedMember.organisationName}
+                    benefits={benefits}
+                    memberRank={selectedMember.membershipTierRank}
+                    redeemedCodes={selectedMember.redeemedBenefitCodes}
+                    progress={partnerProgress}
+                  />
                 )}
 
                 {selectedMember?.organisationId != null && (
