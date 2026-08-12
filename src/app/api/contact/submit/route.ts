@@ -3,12 +3,12 @@ import "dotenv/config";
 
 import { NextResponse } from "next/server";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
+import { prisma } from "@/lib/prisma";
 import {
   enquiriesTrelloBoardEmail,
-  getSatTeamManager,
-  resolveManagerByName,
   resolveTopicByLabel,
 } from "@/content/contactRouting";
+import { resolveAssignedContactManager } from "@/lib/contact-managers";
 import { 
   sendMail, 
   sendMailgun, 
@@ -21,7 +21,7 @@ type SubmitPayload = {
   name: string;
   email: string;
   organisation: string;
-  managerName: string;
+  managerId: string; // admin User.id or SAT_MANAGER_ID
   topicLabel: string;
   subject: string;
   message: string;
@@ -137,7 +137,7 @@ export async function POST(req: Request) {
   const name = (payload.name ?? "").trim();
   const email = (payload.email ?? "").trim();
   const organisation = (payload.organisation ?? "").trim();
-  const managerName = (payload.managerName ?? "").trim();
+  const managerId = (payload.managerId ?? "").trim();
   const topicLabel = (payload.topicLabel ?? "").trim();
   const subject = (payload.subject ?? "").trim();
   const message = (payload.message ?? "").trim();
@@ -149,9 +149,13 @@ export async function POST(req: Request) {
   if (!subject) return badRequest("Subject is required.");
   if (!message) return badRequest("Message is required.");
 
-  // If unauthenticated, force manager to SAT team (as per journey)
-  const manager =
-    (isAuthenticated ? resolveManagerByName(managerName) : null) ?? getSatTeamManager();
+  // If unauthenticated, force manager to SAT team (as per journey). The posted
+  // id is re-resolved server-side against the admin users, so the browser
+  // cannot route to anyone who isn't one.
+  const manager = await resolveAssignedContactManager(
+    prisma,
+    isAuthenticated ? managerId || null : null,
+  );
 
   const topic = resolveTopicByLabel(topicLabel) ?? resolveTopicByLabel("General Enquiry");
   const trelloLabel = topic?.trelloLabel ?? "#General";

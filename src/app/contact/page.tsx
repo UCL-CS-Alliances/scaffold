@@ -5,18 +5,21 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import CalendlyInlineWidget from "@/components/CalendlyInlineWidget";
 import {
-  contactManagers,
   enquiryTopics,
   getSatTeamManager,
-  resolveManagerByName,
+  SAT_MANAGER_ID,
 } from "@/content/contactRouting";
+import type { ContactManagerOption } from "@/lib/contact-managers";
 
 type DefaultsResponse = {
   isAuthenticated: boolean;
   name: string;
   email: string;
   organisation: string;
-  defaultManagerName: string;
+  // Admin users plus the Strategic Alliances Team entry, resolved server-side.
+  managers: ContactManagerOption[];
+  defaultManagerId: string;
+  defaultManagerCalendlyUrl: string;
 };
 
 type SubmitResponse =
@@ -25,19 +28,28 @@ type SubmitResponse =
 
 export default function ContactPage() {
   const [loadingDefaults, setLoadingDefaults] = useState(true);
-  const [defaults, setDefaults] = useState<DefaultsResponse>({
-    isAuthenticated: false,
-    name: "",
-    email: "",
-    organisation: "",
-    defaultManagerName: "Strategic Alliances Team",
+  const [defaults, setDefaults] = useState<DefaultsResponse>(() => {
+    const sat = getSatTeamManager();
+    return {
+      isAuthenticated: false,
+      name: "",
+      email: "",
+      organisation: "",
+      // SAT entry as a standing option so the select renders something even
+      // if the defaults fetch fails.
+      managers: [
+        { id: SAT_MANAGER_ID, name: sat.name, calendlyUrl: sat.calendlyUrl },
+      ],
+      defaultManagerId: SAT_MANAGER_ID,
+      defaultManagerCalendlyUrl: sat.calendlyUrl,
+    };
   });
 
   // Form state
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [organisation, setOrganisation] = useState("");
-  const [managerName, setManagerName] = useState("Strategic Alliances Team");
+  const [managerId, setManagerId] = useState(SAT_MANAGER_ID);
   const [topicLabel, setTopicLabel] = useState("General Enquiry");
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
@@ -64,7 +76,7 @@ export default function ContactPage() {
         setName(data.name ?? "");
         setEmail(data.email ?? "");
         setOrganisation(data.organisation ?? "");
-        setManagerName(data.defaultManagerName || "Strategic Alliances Team");
+        setManagerId(data.defaultManagerId || SAT_MANAGER_ID);
       } catch {
         // Keep defaults; page remains usable for unauth.
       } finally {
@@ -75,15 +87,11 @@ export default function ContactPage() {
     loadDefaults();
   }, []);
 
-  const manager = useMemo(() => {
-    const resolved = resolveManagerByName(managerName);
-    return resolved ?? getSatTeamManager();
-  }, [managerName]);
-
   const calendlyUrl = useMemo(() => {
     if (!defaults.isAuthenticated) return getSatTeamManager().calendlyUrl;
-    return manager.calendlyUrl;
-  }, [defaults.isAuthenticated, manager.calendlyUrl]);
+    const selected = defaults.managers.find((m) => m.id === managerId);
+    return selected?.calendlyUrl ?? defaults.defaultManagerCalendlyUrl;
+  }, [defaults, managerId]);
 
   const canSend =
     !submitting &&
@@ -124,9 +132,9 @@ export default function ContactPage() {
     setSubmitting(true);
 
     try {
-      const effectiveManagerName = defaults.isAuthenticated
-        ? managerName
-        : "Strategic Alliances Team";
+      const effectiveManagerId = defaults.isAuthenticated
+        ? managerId
+        : SAT_MANAGER_ID;
 
       const res = await fetch("/api/contact/submit", {
         method: "POST",
@@ -135,7 +143,7 @@ export default function ContactPage() {
           name,
           email,
           organisation,
-          managerName: effectiveManagerName,
+          managerId: effectiveManagerId,
           topicLabel,
           subject,
           message,
@@ -241,14 +249,14 @@ export default function ContactPage() {
             <label>
               <div>Client experience manager</div>
               <select
-                value={defaults.isAuthenticated ? managerName : "Strategic Alliances Team"}
-                onChange={(e) => setManagerName(e.target.value)}
+                value={defaults.isAuthenticated ? managerId : SAT_MANAGER_ID}
+                onChange={(e) => setManagerId(e.target.value)}
                 disabled={!defaults.isAuthenticated}
                 aria-disabled={!defaults.isAuthenticated}
                 style={{ width: "100%" }}
               >
-                {contactManagers.map((m) => (
-                  <option key={m.name} value={m.name}>
+                {defaults.managers.map((m) => (
+                  <option key={m.id} value={m.id}>
                     {m.name}
                   </option>
                 ))}

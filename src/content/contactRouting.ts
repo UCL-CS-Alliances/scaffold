@@ -15,6 +15,10 @@ export type EnquiryTopic = {
 export const enquiriesTrelloBoardEmail =
   "uclcomputersciencealliances+e1iwirenv1yyv1kekohk@boards.trello.com";
 
+// Sentinel manager id for "the Strategic Alliances Team" in manager dropdowns,
+// alongside real admin User ids. A cuid can never equal it.
+export const SAT_MANAGER_ID = "SAT";
+
 export const contactManagers: ContactManager[] = [
   {
     name: "Daniel Hajas",
@@ -67,6 +71,17 @@ export function resolveManagerByName(name: string | null | undefined) {
   if (!name) return null;
   const trimmed = name.trim();
   return contactManagers.find((m) => m.name === trimmed) ?? null;
+}
+
+/**
+ * Calendly/Trello routing metadata for an assigned admin, matched on the email
+ * both records share. Null when the admin has no entry here — callers fall
+ * back to the SAT team's metadata.
+ */
+export function resolveManagerByEmail(email: string | null | undefined) {
+  if (!email) return null;
+  const needle = email.trim().toLowerCase();
+  return contactManagers.find((m) => m.email.toLowerCase() === needle) ?? null;
 }
 
 export function getSatTeamManager() {
