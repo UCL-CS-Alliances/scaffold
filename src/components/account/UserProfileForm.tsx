@@ -11,6 +11,7 @@ type Meta = {
   roles: { id: number; key: string; label: string }[];
   tiers: { id: number; key: string; label: string; rank: number }[];
   apps: { id: number; key: string; name: string }[];
+  admins: { id: string; name: string }[];
 };
 
 type AppsMeta = { apps: { id: number; key: string; name: string }[] };
@@ -112,7 +113,10 @@ export default function UserProfileForm(props: {
   // Membership (admin-only)
   const [membershipTierId, setMembershipTierId] = useState<number | null>(null);
   const [membershipStatus, setMembershipStatus] = useState<string>("active");
-  const [membershipManagerName, setMembershipManagerName] = useState<string>("");
+  const [membershipManagerId, setMembershipManagerId] = useState<string | null>(null);
+  // The stored assignment as loaded, kept separately so it still renders as an
+  // option when its admin is no longer in meta.admins (demoted since).
+  const [loadedManager, setLoadedManager] = useState<{ id: string; name: string } | null>(null);
   const [membershipExpiryText, setMembershipExpiryText] = useState<string>(""); // dd/mm/yyyy
 
   // Pending additions (admin-only)
@@ -278,7 +282,8 @@ export default function UserProfileForm(props: {
 
         setMembershipTierId(data.membershipEdit?.membershipTierId ?? null);
         setMembershipStatus((data.membershipEdit?.status ?? "active") || "active");
-        setMembershipManagerName(data.membershipEdit?.managerName ?? "");
+        setMembershipManagerId(data.membershipEdit?.clientExperienceManager?.id ?? null);
+        setLoadedManager(data.membershipEdit?.clientExperienceManager ?? null);
         setMembershipExpiryText(data.membershipEdit?.expiryText ?? "");
       }
     } catch (e: any) {
@@ -526,14 +531,14 @@ export default function UserProfileForm(props: {
             ? {
                 membershipTierId,
                 status: (membershipStatus || "active").trim() || "active",
-                managerName: membershipManagerName.trim() || null,
+                clientExperienceManagerId: membershipManagerId,
                 expiryText: membershipExpiryText.trim() || null,
                 isActive: derivedIsActive,
               }
             : {
                 membershipTierId: null,
                 status: null,
-                managerName: null,
+                clientExperienceManagerId: null,
                 expiryText: null,
                 isActive: true,
               },
@@ -805,16 +810,28 @@ export default function UserProfileForm(props: {
               </div>
 
               <div className="auth-field">
-                <label className="auth-label" htmlFor="managerName">
+                <label className="auth-label" htmlFor="managerId">
                   Client experience manager
                 </label>
-                <input
-                  id="managerName"
+                <select
+                  id="managerId"
                   className="auth-input"
-                  value={membershipManagerName}
-                  onChange={(e) => setMembershipManagerName(e.target.value)}
-                  placeholder="Optional"
-                />
+                  value={membershipManagerId ?? ""}
+                  onChange={(e) => setMembershipManagerId(e.target.value || null)}
+                >
+                  <option value="">—</option>
+                  {meta.admins.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                  {loadedManager &&
+                    !meta.admins.some((a) => a.id === loadedManager.id) && (
+                      <option value={loadedManager.id}>
+                        {loadedManager.name} (no longer an admin)
+                      </option>
+                    )}
+                </select>
               </div>
 
               <div className="auth-field">
