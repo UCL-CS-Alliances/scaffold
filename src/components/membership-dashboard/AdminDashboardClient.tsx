@@ -145,10 +145,14 @@ export default function AdminDashboardClient(props: {
     asBenefitsViewKey(sp?.get("view")) ?? "stats",
   );
 
+  // Sync from the URL only when the URL itself changes (same as the tab effect
+  // above): with benefitsView in the deps this re-ran against the stale URL the
+  // moment changeBenefitsView set state, snapping the view straight back.
   useEffect(() => {
     const next = asBenefitsViewKey(sp?.get("view")) ?? "stats";
     if (next !== benefitsView) setBenefitsView(next);
-  }, [sp, benefitsView]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sp]);
 
   function changeBenefitsView(next: BenefitsViewKey) {
     setBenefitsView(next);
