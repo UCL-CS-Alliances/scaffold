@@ -12,6 +12,7 @@ import {
 } from "@/lib/benefit-access";
 import SecondaryNav from "@/components/membership-dashboard/SecondaryNav";
 import BenefitsFilterToolbar from "@/components/membership-dashboard/BenefitsFilterToolbar";
+import { getSatTeamManager } from "@/content/contactRouting";
 
 type MemberDashboardProps = {
   firstName: string;
@@ -64,11 +65,12 @@ export default function MemberDashboard(props: MemberDashboardProps) {
         )
       : "Not set";
 
-  // Default always to Marco Piccionello when not provided
+  // No assigned manager: the Strategic Alliances Team fronts the relationship,
+  // matching the check-in link and contact form fallbacks.
   const manager =
     membershipManagerName && membershipManagerName.trim().length
       ? membershipManagerName
-      : "Marco Piccionello";
+      : getSatTeamManager().name;
 
   // Build benefit rows with computed state
   const benefitRows = useMemo(() => {

@@ -55,7 +55,7 @@ export async function GET(req: Request) {
     tierLabel: membership?.tierLabel ?? null,
     status: membership?.status ?? null,
     expiryText,
-    managerName: membership?.managerName ?? null,
+    managerName: membership?.clientExperienceManager?.name ?? null,
     isActive: membership?.isActive ?? null,
   };
 
