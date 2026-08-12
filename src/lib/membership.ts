@@ -20,6 +20,17 @@ import type { Prisma, PrismaClient } from "@prisma/client";
  */
 export type MembershipClient = PrismaClient | Prisma.TransactionClient;
 
+/**
+ * The admin user assigned as the organisation's client experience manager.
+ * Null when unassigned (or the manager's account was deleted — the FK is
+ * SET NULL); consumers render the Strategic Alliances Team fallback then.
+ */
+export type MembershipClientExperienceManager = {
+  id: string;
+  name: string;
+  email: string;
+};
+
 export type OrganisationMembership = {
   membershipId: number;
   organisationId: number;
@@ -30,7 +41,9 @@ export type OrganisationMembership = {
   tierRank: number;
   isActive: boolean;
   status: string;
+  /** Transitional: the free-text column the CEM relation replaces. */
   managerName: string | null;
+  clientExperienceManager: MembershipClientExperienceManager | null;
   expiry: Date | null;
 };
 
@@ -40,10 +53,18 @@ export async function getMembershipForOrganisation(
 ): Promise<OrganisationMembership | null> {
   const membership = await client.membership.findUnique({
     where: { organisationId },
-    include: { membershipTier: true, organisation: true },
+    include: {
+      membershipTier: true,
+      organisation: true,
+      clientExperienceManager: {
+        select: { id: true, firstName: true, lastName: true, email: true },
+      },
+    },
   });
 
   if (!membership || !membership.isActive) return null;
+
+  const manager = membership.clientExperienceManager;
 
   return {
     membershipId: membership.id,
@@ -56,6 +77,13 @@ export async function getMembershipForOrganisation(
     isActive: membership.isActive,
     status: membership.status,
     managerName: membership.managerName,
+    clientExperienceManager: manager
+      ? {
+          id: manager.id,
+          name: `${manager.firstName} ${manager.lastName}`,
+          email: manager.email,
+        }
+      : null,
     expiry: membership.expiry,
   };
 }
