@@ -122,9 +122,8 @@ model Membership {
   isActive Boolean @default(true)
 
   // Mirrors YAML fields
-  status      String    @default("active")
-  managerName String?
-  expiry      DateTime?
+  status String    @default("active")
+  expiry DateTime?
 
   // The client experience manager, assigned from the platform's ADMIN users.
   // SET NULL so the membership survives its manager's account deletion, the

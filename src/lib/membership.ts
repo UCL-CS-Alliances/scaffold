@@ -41,8 +41,6 @@ export type OrganisationMembership = {
   tierRank: number;
   isActive: boolean;
   status: string;
-  /** Transitional: the free-text column the CEM relation replaces. */
-  managerName: string | null;
   clientExperienceManager: MembershipClientExperienceManager | null;
   expiry: Date | null;
 };
@@ -76,7 +74,6 @@ export async function getMembershipForOrganisation(
     tierRank: membership.membershipTier.rank,
     isActive: membership.isActive,
     status: membership.status,
-    managerName: membership.managerName,
     clientExperienceManager: manager
       ? {
           id: manager.id,

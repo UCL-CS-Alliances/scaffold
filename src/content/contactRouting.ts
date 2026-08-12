@@ -67,12 +67,6 @@ export const enquiryTopics: EnquiryTopic[] = [
   { label: "General Enquiry", trelloLabel: "#General" },
 ];
 
-export function resolveManagerByName(name: string | null | undefined) {
-  if (!name) return null;
-  const trimmed = name.trim();
-  return contactManagers.find((m) => m.name === trimmed) ?? null;
-}
-
 /**
  * Calendly/Trello routing metadata for an assigned admin, matched on the email
  * both records share. Null when the admin has no entry here — callers fall

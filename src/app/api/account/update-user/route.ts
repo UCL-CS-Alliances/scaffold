@@ -38,7 +38,6 @@ type UserAuditSnapshot = {
     organisationId: number;
     isActive: boolean;
     status: string;
-    managerName: string | null;
     clientExperienceManager: { id: string; name: string; email: string } | null;
     expiry: string | null;
   } | null;
@@ -74,7 +73,6 @@ async function getUserAuditSnapshot(
               organisationId: true,
               isActive: true,
               status: true,
-              managerName: true,
               clientExperienceManager: {
                 select: { id: true, firstName: true, lastName: true, email: true },
               },
@@ -105,7 +103,6 @@ async function getUserAuditSnapshot(
           organisationId: membership.organisationId,
           isActive: membership.isActive,
           status: membership.status,
-          managerName: membership.managerName,
           // Name and email, not just the id: the audit trail should read
           // without a join against a user table that may since have changed.
           clientExperienceManager: membership.clientExperienceManager
@@ -475,9 +472,6 @@ export async function POST(req: Request) {
           isActive: Boolean(admin.membership.isActive),
           status: String(admin.membership.status ?? "active"),
           clientExperienceManagerId: cemUser?.id ?? null,
-          // Transitional mirror of the relation, so consumers still reading
-          // the free-text column stay truthful. Removed with the column drop.
-          managerName: cemUser ? `${cemUser.firstName} ${cemUser.lastName}` : null,
           expiry,
         };
 
