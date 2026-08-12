@@ -282,7 +282,14 @@ export default function UserProfileForm(props: {
 
         setMembershipTierId(data.membershipEdit?.membershipTierId ?? null);
         setMembershipStatus((data.membershipEdit?.status ?? "active") || "active");
-        setMembershipManagerId(data.membershipEdit?.clientExperienceManager?.id ?? null);
+        // No membership row yet means the next save creates one, so default
+        // its manager to the admin doing the creating — still overridable
+        // from the dropdown before saving.
+        setMembershipManagerId(
+          data.membershipEdit
+            ? data.membershipEdit.clientExperienceManager?.id ?? null
+            : meId,
+        );
         setLoadedManager(data.membershipEdit?.clientExperienceManager ?? null);
         setMembershipExpiryText(data.membershipEdit?.expiryText ?? "");
       }

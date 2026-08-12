@@ -439,8 +439,19 @@ export async function POST(req: Request) {
         // Re-validated only when the assignment changes, so an admin who was
         // demoted after being assigned does not block unrelated saves.
         const rawCemId = admin.membership.clientExperienceManagerId;
-        const cemId =
+        let cemId =
           typeof rawCemId === "string" && rawCemId.trim() ? rawCemId.trim() : null;
+
+        // A membership being created by a client that omitted the field gets
+        // the acting admin as its manager — the server-side twin of the
+        // profile form's default. An explicit null ("—") is respected.
+        if (
+          !cemId &&
+          !before?.membership &&
+          !("clientExperienceManagerId" in admin.membership)
+        ) {
+          cemId = String(me.id);
+        }
         let cemUser: { id: string; firstName: string; lastName: string } | null = null;
         if (cemId) {
           cemUser = await tx.user.findFirst({
