@@ -26,9 +26,16 @@ import type { Prisma, PrismaClient } from "@prisma/client";
  */
 export type BenefitCatalogueClient = PrismaClient | Prisma.TransactionClient;
 
+/** A process step with its stable BenefitAction.id, which is what the
+ * per-partner progress map keys on — the detail page joins the two. */
+export type CatalogueBenefitStep = {
+  id: number;
+  body: string;
+};
+
 export type CatalogueBenefitProcess = {
   trigger: string | null;
-  actions: string[];
+  actions: CatalogueBenefitStep[];
   outcome: string | null;
 };
 
@@ -51,32 +58,45 @@ export type CatalogueBenefit = {
 
   process: CatalogueBenefitProcess;
   terms: string[];
+
+  /** Present only on an `includeRetired` read, so the shape existing callers
+   * hand to client components is unchanged. False means retired. */
+  isActive?: boolean;
 };
 
 /**
  * The catalogue as members and admins should see it, ordered as the Strategic
  * Alliances Team ordered it.
  *
- * Retired benefits (isActive = false) are excluded: retirement exists so a
- * benefit can be withdrawn without deleting it, which would dangle in the
- * redemption history that stores bare codes. Note the consequence for any
- * lookup that turns a redeemed code into a label — a code redeemed before its
- * benefit was retired will not resolve here, and the call site falls back to
- * showing the raw code.
+ * Retired benefits (isActive = false) are excluded by default: retirement
+ * exists so a benefit can be withdrawn without deleting it, which would dangle
+ * in the redemption history that stores bare codes. Note the consequence for
+ * any lookup that turns a redeemed code into a label — a code redeemed before
+ * its benefit was retired will not resolve here, and the call site falls back
+ * to showing the raw code.
+ *
+ * `includeRetired` exists for the admin catalogue editor, which has to show a
+ * retired benefit in order to restore it. It also surfaces `isActive` on each
+ * entry so the editor can tell the two apart; member-facing callers never pass
+ * it and their shape is unchanged.
  */
 export async function getBenefitCatalogue(
   client: BenefitCatalogueClient,
+  options: { includeRetired?: boolean } = {},
 ): Promise<CatalogueBenefit[]> {
+  const includeRetired = options.includeRetired ?? false;
+
   const rows = await client.benefit.findMany({
-    where: { isActive: true },
+    where: includeRetired ? {} : { isActive: true },
     orderBy: { sortOrder: "asc" },
     include: {
       tierMin: { select: { key: true, rank: true } },
-      actions: { orderBy: { position: "asc" }, select: { body: true } },
+      actions: { orderBy: { position: "asc" }, select: { id: true, body: true } },
     },
   });
 
   return rows.map((row) => ({
+    ...(includeRetired ? { isActive: row.isActive } : {}),
     id: row.code,
     label: row.label,
     description: row.description,
@@ -86,11 +106,150 @@ export async function getBenefitCatalogue(
     supersedes: row.supersedesCodes,
     process: {
       trigger: row.trigger,
-      actions: row.actions.map((action) => action.body),
+      actions: row.actions,
       outcome: row.outcome,
     },
     terms: row.terms,
   }));
+}
+
+export type EditorBenefitStep = {
+  /** BenefitAction.id — the stable handle the reorder/delete actions take,
+   * and what phase E's progress rows point at. */
+  id: number;
+  position: number;
+  body: string;
+};
+
+export type EditorBenefit = {
+  /** Benefit.id — what the catalogue server actions key on. Distinct from
+   * CatalogueBenefit.id, which is the code. */
+  benefitId: number;
+  code: string;
+  label: string;
+  description: string;
+  category: string;
+  tierMinId: number;
+  tierMinLabel: string;
+  /** Rank for eligibility checks (the admin progress tracker filters on it). */
+  tierMinRank: number;
+  trigger: string | null;
+  outcome: string | null;
+  terms: string[];
+  supersedesCodes: string[];
+  isActive: boolean;
+  steps: EditorBenefitStep[];
+};
+
+/**
+ * The catalogue as the admin editor needs it: retired benefits included
+ * (restoring one requires seeing it), database ids surfaced (the edit actions
+ * key on Benefit.id and BenefitAction.id, not on the code), and steps carried
+ * as rows rather than flattened to strings. Member-facing reads should use
+ * getBenefitCatalogue; this shape exists so the editor does not have to
+ * overload it.
+ */
+export async function getBenefitCatalogueForEditor(
+  client: BenefitCatalogueClient,
+): Promise<EditorBenefit[]> {
+  const rows = await client.benefit.findMany({
+    orderBy: { sortOrder: "asc" },
+    include: {
+      tierMin: { select: { id: true, label: true, rank: true } },
+      actions: {
+        orderBy: { position: "asc" },
+        select: { id: true, position: true, body: true },
+      },
+    },
+  });
+
+  return rows.map((row) => ({
+    benefitId: row.id,
+    code: row.code,
+    label: row.label,
+    description: row.description,
+    category: row.category,
+    tierMinId: row.tierMin.id,
+    tierMinLabel: row.tierMin.label,
+    tierMinRank: row.tierMin.rank,
+    trigger: row.trigger,
+    outcome: row.outcome,
+    terms: row.terms,
+    supersedesCodes: row.supersedesCodes,
+    isActive: row.isActive,
+    steps: row.actions,
+  }));
+}
+
+/**
+ * One partner's benefit notes, keyed by benefit code — one query for the
+ * whole map, not one per benefit. Both surfaces read through this: the admin
+ * editor takes the map, the member detail page reads a single entry out of
+ * it. A missing key means no note, which is the designed-for common case —
+ * the table stays sparse because an emptied note deletes the row.
+ *
+ * A plain object rather than a Map so the result can cross the server →
+ * client component boundary as props unchanged.
+ */
+export async function getBenefitPartnerNotesForOrganisation(
+  client: BenefitCatalogueClient,
+  organisationId: number,
+): Promise<Record<string, string>> {
+  const rows = await client.benefitPartnerNote.findMany({
+    where: { organisationId },
+    select: { body: true, benefit: { select: { code: true } } },
+  });
+
+  return Object.fromEntries(rows.map((row) => [row.benefit.code, row.body]));
+}
+
+/** Presence of a key means the step is complete; the value records when.
+ * completedAt is nullable in the schema as headroom, but the save action
+ * always stamps it, so expect a Date in practice. */
+export type BenefitActionProgressMap = Record<
+  number,
+  { completedAt: Date | null }
+>;
+
+/**
+ * One partner's per-step benefit progress, keyed by BenefitAction.id — one
+ * query for the whole map (phase E). Admin-written via
+ * saveBenefitActionProgressAction, member-read on the benefit detail page.
+ * Progress is the organisation's, like redemption and notes — and for a
+ * stepped benefit, redemption is *derived* from it (2026-08-12): all steps
+ * complete ⟺ redeemed, kept true by the save action.
+ */
+export async function getBenefitActionProgressForOrganisation(
+  client: BenefitCatalogueClient,
+  organisationId: number,
+): Promise<BenefitActionProgressMap> {
+  const rows = await client.benefitActionProgress.findMany({
+    where: { organisationId },
+    select: { benefitActionId: true, completedAt: true },
+  });
+
+  return Object.fromEntries(
+    rows.map((row) => [row.benefitActionId, { completedAt: row.completedAt }]),
+  );
+}
+
+/**
+ * How many partners have recorded progress on each step, keyed by
+ * BenefitAction.id. Steps nobody has progress on are absent. Feeds the
+ * editor's step-deletion warning: deletion cascades progress rows, and the
+ * confirm dialog must say how many partners that touches.
+ */
+export async function getBenefitActionProgressPartnerCounts(
+  client: BenefitCatalogueClient,
+): Promise<Record<number, number>> {
+  const rows = await client.benefitActionProgress.groupBy({
+    by: ["benefitActionId"],
+    _count: { _all: true },
+  });
+
+  return Object.fromEntries(
+    rows.map((row) => [row.benefitActionId, row._count._all]),
+  );
 }
 
 /**

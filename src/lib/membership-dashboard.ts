@@ -22,6 +22,10 @@ export type AdminDashboardSummary = {
 
 export type MemberDashboardData = {
   firstName: string;
+  // Resolved from the signed-in user's record, so pages needing
+  // organisation-scoped reads (e.g. the partner note on the benefit detail
+  // page) never take an organisation from a query parameter.
+  organisationId: number | null;
   organisationName: string | null;
 
   // Membership info
@@ -113,6 +117,7 @@ export async function getMemberDashboardData(
 
   return {
     firstName: user.firstName,
+    organisationId: user.organisationId,
     organisationName: user.organisation?.name ?? null,
     membershipTierLabel: membership?.tierLabel ?? "Unknown tier",
     membershipTierKey: membership?.tierKey ?? null,

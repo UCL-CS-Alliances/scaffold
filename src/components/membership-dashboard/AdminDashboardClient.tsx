@@ -4,21 +4,37 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { CatalogueBenefit } from "@/lib/benefits";
+import type {
+  BenefitActionProgressMap,
+  CatalogueBenefit,
+  EditorBenefit,
+} from "@/lib/benefits";
 import type {
   AdminBenefitAuditEntry,
   AdminBenefitRedemptionStat,
   AdminMemberListItem,
   AdminSelectedMember,
+  MembershipTierOption,
 } from "@/lib/membership-dashboard-admin";
 import type { HandbookRenderResult } from "@/lib/handbook";
-import { hasBenefitAccess } from "@/lib/benefit-access";
-import { saveRedeemedBenefitsAction } from "@/lib/membership-dashboard-actions";
+import BenefitCatalogueEditor from "./BenefitCatalogueEditor";
+import BenefitPartnerNotes from "./BenefitPartnerNotes";
+import BenefitRedemptionChecklist from "./BenefitRedemptionChecklist";
 
 type TabKey = "members" | "benefits" | "handbook";
 
 function asTabKey(v: string | null | undefined): TabKey | null {
   if (v === "members" || v === "benefits" || v === "handbook") return v;
+  return null;
+}
+
+// The benefits tab's no-selection view: redemption stats by default, with the
+// catalogue editor as a deliberate ?view= destination (same guard style as
+// asTabKey; talent-discovery's ?view= is the precedent).
+type BenefitsViewKey = "stats" | "editor";
+
+function asBenefitsViewKey(v: string | null | undefined): BenefitsViewKey | null {
+  if (v === "stats" || v === "editor") return v;
   return null;
 }
 
@@ -69,8 +85,13 @@ export default function AdminDashboardClient(props: {
   selectedUserId: string | null;
   selectedMember: AdminSelectedMember | null;
   benefits: CatalogueBenefit[];
+  editorBenefits: EditorBenefit[];
+  tierOptions: MembershipTierOption[];
   benefitStats: AdminBenefitRedemptionStat[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
+  partnerNotes: Record<string, string>;
+  partnerProgress: BenefitActionProgressMap;
+  stepProgressCounts: Record<number, number>;
   initialTab?: string | null;
   handbook: HandbookRenderResult;
 }) {
@@ -79,15 +100,22 @@ export default function AdminDashboardClient(props: {
     selectedUserId,
     selectedMember,
     benefits,
+    editorBenefits,
+    tierOptions,
     benefitStats,
     benefitAuditTrail,
+    partnerNotes,
+    partnerProgress,
+    stepProgressCounts,
     initialTab,
     handbook,
   } = props;
 
   const router = useRouter();
   const sp = useSearchParams();
-  const [isPending, startTransition] = useTransition();
+  // Only the trigger is needed now: per-benefit saves own their pending state
+  // inside BenefitRedemptionChecklist.
+  const [, startTransition] = useTransition();
 
   const tocSlug = handbook.chapters[0]?.slug ?? "table-of-contents";
 
@@ -111,8 +139,39 @@ export default function AdminDashboardClient(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp]);
 
+  // Stats are the default; the editor is opted into via ?view=editor so an
+  // admin never lands on live-editing forms by accident.
+  const [benefitsView, setBenefitsView] = useState<BenefitsViewKey>(
+    asBenefitsViewKey(sp?.get("view")) ?? "stats",
+  );
+
+  // Sync from the URL only when the URL itself changes (same as the tab effect
+  // above): with benefitsView in the deps this re-ran against the stale URL the
+  // moment changeBenefitsView set state, snapping the view straight back.
+  useEffect(() => {
+    const next = asBenefitsViewKey(sp?.get("view")) ?? "stats";
+    if (next !== benefitsView) setBenefitsView(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sp]);
+
+  function changeBenefitsView(next: BenefitsViewKey) {
+    setBenefitsView(next);
+    const params = new URLSearchParams(sp?.toString());
+    if (next === "stats") params.delete("view");
+    else params.set("view", next);
+
+    startTransition(() => {
+      pushWithParams(params);
+    });
+  }
+
   const hasSelection = Boolean(selectedUserId && selectedMember);
 
+  // No router.refresh() alongside this: the page is force-dynamic, so the
+  // replace already fetches a fresh server render. A refresh would run a second
+  // full render concurrently — on the pooled connection_limit=1 database every
+  // query serialises, and the doubled queue is enough to hit Prisma's pool
+  // timeout, which is what made selecting a partner hang or fail to load.
   function pushWithParams(nextParams: URLSearchParams) {
     router.replace(`/membership-dashboard?${nextParams.toString()}`);
   }
@@ -124,7 +183,6 @@ export default function AdminDashboardClient(props: {
 
     startTransition(() => {
       pushWithParams(params);
-      router.refresh();
     });
   }
 
@@ -140,7 +198,6 @@ export default function AdminDashboardClient(props: {
 
     startTransition(() => {
       pushWithParams(params);
-      router.refresh();
     });
   }
 
@@ -226,31 +283,6 @@ export default function AdminDashboardClient(props: {
     benefitStats.forEach((s) => m.set(s.benefitId, s));
     return m;
   }, [benefitStats]);
-
-  const [draftRedeemed, setDraftRedeemed] = useState<Set<string>>(
-    new Set((selectedMember?.redeemedBenefitCodes ?? []) as string[]),
-  );
-
-  useEffect(() => {
-    setDraftRedeemed(
-      new Set((selectedMember?.redeemedBenefitCodes ?? []) as string[]),
-    );
-  }, [selectedUserId, selectedMember]);
-
-  async function saveBenefits() {
-    const organisationId = selectedMember?.organisationId;
-    if (organisationId == null) return;
-
-    const redeemedBenefitCodes = Array.from(draftRedeemed);
-
-    startTransition(async () => {
-      await saveRedeemedBenefitsAction({
-        organisationId,
-        redeemedBenefitCodes,
-      });
-      router.refresh();
-    });
-  }
 
   function handbookHref(chapterSlug: string) {
     const params = new URLSearchParams(sp?.toString());
@@ -460,8 +492,38 @@ export default function AdminDashboardClient(props: {
           >
             {!hasSelection ? (
               <>
-                <h3 style={{ marginTop: 0 }}>Benefits overview</h3>
+                <h3 style={{ marginTop: 0 }}>
+                  {benefitsView === "editor"
+                    ? "Benefit catalogue editor"
+                    : "Benefits overview"}
+                </h3>
 
+                <div className="cluster" style={{ marginBottom: ".75rem" }}>
+                  <button
+                    type="button"
+                    className={`tab ${benefitsView === "stats" ? "is-active" : ""}`}
+                    aria-pressed={benefitsView === "stats"}
+                    onClick={() => changeBenefitsView("stats")}
+                  >
+                    Redemption stats
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab ${benefitsView === "editor" ? "is-active" : ""}`}
+                    aria-pressed={benefitsView === "editor"}
+                    onClick={() => changeBenefitsView("editor")}
+                  >
+                    Edit catalogue
+                  </button>
+                </div>
+
+                {benefitsView === "editor" ? (
+                  <BenefitCatalogueEditor
+                    benefits={editorBenefits}
+                    tierOptions={tierOptions}
+                    stepProgressCounts={stepProgressCounts}
+                  />
+                ) : (
                 <div className="table-wrap">
                   <table className="table">
                     <thead>
@@ -497,100 +559,33 @@ export default function AdminDashboardClient(props: {
                     </tbody>
                   </table>
                 </div>
+                )}
               </>
             ) : (
               <>
                 <h3 style={{ marginTop: 0 }}>Benefit redemption checklist</h3>
 
-                <p className="small" style={{ marginTop: ".25rem" }}>
-                  Benefits are recorded for{" "}
-                  <strong>
-                    {selectedMember?.organisationName ?? "the organisation"}
-                  </strong>{" "}
-                  as a whole, not for an individual contact. Every contact there
-                  sees the same redemption state.
-                </p>
+                {selectedMember?.organisationId != null && (
+                  <BenefitRedemptionChecklist
+                    organisationId={selectedMember.organisationId}
+                    organisationName={selectedMember.organisationName}
+                    benefits={benefits}
+                    memberRank={selectedMember.membershipTierRank}
+                    redeemedCodes={selectedMember.redeemedBenefitCodes}
+                    progress={partnerProgress}
+                  />
+                )}
 
-                <ul className="list-plain" style={{ marginTop: ".75rem" }}>
-                  {benefits.map((b) => {
-                    const included = hasBenefitAccess(
-                      selectedMember?.membershipTierRank ?? null,
-                      b.tierMinRank,
-                    );
-                    const checked = draftRedeemed.has(b.id);
-
-                    if (!included) {
-                      return (
-                        <li
-                          key={b.id}
-                          className="tile"
-                          style={{
-                            padding: ".5rem .75rem",
-                            marginBottom: ".5rem",
-                          }}
-                        >
-                          <span role="img" aria-label="Locked">
-                            🔒
-                          </span>{" "}
-                          <strong>{b.label}</strong>
-                        </li>
-                      );
-                    }
-
-                    return (
-                      <li
-                        key={b.id}
-                        className="tile"
-                        style={{
-                          padding: ".5rem .75rem",
-                          marginBottom: ".5rem",
-                        }}
-                      >
-                        <label
-                          style={{
-                            display: "flex",
-                            gap: ".5rem",
-                            alignItems: "flex-start",
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) => {
-                              const next = new Set(draftRedeemed);
-                              if (e.target.checked) next.add(b.id);
-                              else next.delete(b.id);
-                              setDraftRedeemed(next);
-                            }}
-                          />
-                          <span>
-                            <strong>{b.label}</strong>
-                          </span>
-                        </label>
-                      </li>
-                    );
-                  })}
-                </ul>
-
-                <div
-                  style={{
-                    display: "flex",
-                    gap: ".75rem",
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="button-link"
-                    onClick={saveBenefits}
-                    disabled={isPending}
-                    aria-disabled={isPending ? "true" : undefined}
-                  >
-                    Save changes
-                  </button>
-                  {isPending && <span className="small">Saving…</span>}
-                </div>
+                {selectedMember?.organisationId != null && (
+                  <div style={{ marginTop: "1.5rem" }}>
+                    <BenefitPartnerNotes
+                      organisationId={selectedMember.organisationId}
+                      organisationName={selectedMember.organisationName}
+                      benefits={benefits}
+                      notes={partnerNotes}
+                    />
+                  </div>
+                )}
 
                 <div style={{ marginTop: "1.5rem" }}>
                   <h4 style={{ marginBottom: ".5rem" }}>

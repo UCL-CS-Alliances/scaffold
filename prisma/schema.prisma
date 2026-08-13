@@ -47,6 +47,9 @@ model User {
   // Audit log relation (actor)
   auditLogs AuditLog[] @relation("AuditActor")
 
+  // Progress rows this admin ticked; SET NULL on deletion, like auditLogs.
+  benefitActionProgress BenefitActionProgress[]
+
   @@index([organisationId])
 }
 
@@ -66,6 +69,9 @@ model Organisation {
   // Admin-written notes about a specific benefit for this partner. The note is
   // the organisation's for the same reason its membership is.
   benefitNotes BenefitPartnerNote[]
+
+  // Per-step benefit progress, organisation-scoped like everything above.
+  benefitActionProgress BenefitActionProgress[]
 }
 
 enum OrganisationType {
@@ -238,7 +244,38 @@ model BenefitAction {
   position Int
   body     String
 
+  progress BenefitActionProgress[]
+
   @@index([benefitId, position])
+}
+
+// A partner's progress through a benefit's process: one row per completed
+// step, admin-ticked and member-read. Progress belongs to the organisation,
+// like membership, redemption and notes — and hangs off BenefitAction.id,
+// which is why the catalogue editor reorders steps in place: deleting a step
+// is the only operation meant to cascade progress away. Deliberately does NOT
+// touch redemption state; only saveRedeemedBenefitsAction writes that.
+model BenefitActionProgress {
+  id Int @id @default(autoincrement())
+
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  organisationId Int
+
+  benefitAction   BenefitAction @relation(fields: [benefitActionId], references: [id], onDelete: Cascade)
+  benefitActionId Int
+
+  // A nullable timestamp rather than a boolean: "when" costs nothing extra
+  // and answers questions a boolean cannot. Untick deletes the row, so null
+  // is unreachable today — headroom, not a state the code writes.
+  completedAt DateTime?
+
+  // Mirrors AuditLog.actorId: deleting an admin must not delete a partner's
+  // recorded progress.
+  completedBy   User?   @relation(fields: [completedById], references: [id], onDelete: SetNull)
+  completedById String?
+
+  @@unique([organisationId, benefitActionId])
+  @@index([organisationId])
 }
 
 model BenefitPartnerNote {

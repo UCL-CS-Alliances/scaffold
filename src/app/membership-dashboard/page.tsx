@@ -12,6 +12,7 @@ import {
   getAdminBenefitRedemptionStats,
   getAdminMemberList,
   getAdminSelectedMember,
+  getMembershipTierOptions,
 } from "@/lib/membership-dashboard-admin";
 import { renderHandbookChapterBySlug } from "@/lib/handbook";
 import AdminDashboard from "@/components/membership-dashboard/AdminDashboard";
@@ -20,7 +21,13 @@ import SignInForm from "@/components/SignInForm";
 import { pageCopy } from "@/content/pageCopy";
 import { userCanAccessApp } from "@/lib/access-control";
 import prisma from "@/lib/prisma";
-import { getBenefitCatalogue } from "@/lib/benefits";
+import {
+  getBenefitActionProgressForOrganisation,
+  getBenefitActionProgressPartnerCounts,
+  getBenefitCatalogue,
+  getBenefitCatalogueForEditor,
+  getBenefitPartnerNotesForOrganisation,
+} from "@/lib/benefits";
 
 type Props = {
   searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -91,23 +98,55 @@ export default async function MembershipDashboardPage(props: Props) {
     // it; the client component receives the same list.
     const benefits = await getBenefitCatalogue(prisma);
 
-    const [summary, members, selectedMember, benefitStats, handbook, totalUsers] =
-      await Promise.all([
-        getAdminDashboardSummary(),
-        getAdminMemberList(),
-        selectedUserId
-          ? getAdminSelectedMember(selectedUserId)
-          : Promise.resolve(null),
-        getAdminBenefitRedemptionStats(benefits),
-        renderHandbookChapterBySlug(chapter ?? undefined),
-        prisma.user.count(),
-      ]);
+    const [
+      summary,
+      members,
+      selectedMember,
+      benefitStats,
+      handbook,
+      totalUsers,
+      editorBenefits,
+      tierOptions,
+    ] = await Promise.all([
+      getAdminDashboardSummary(),
+      getAdminMemberList(),
+      selectedUserId
+        ? getAdminSelectedMember(selectedUserId)
+        : Promise.resolve(null),
+      getAdminBenefitRedemptionStats(benefits),
+      renderHandbookChapterBySlug(chapter ?? undefined),
+      prisma.user.count(),
+      // The editor's own shape: retired benefits included, database ids and
+      // step rows surfaced. Member-facing consumers keep the list above.
+      getBenefitCatalogueForEditor(prisma),
+      getMembershipTierOptions(),
+    ]);
+
+    // Feeds the editor's step-deletion warning: how many partners' progress
+    // rows cascade away with each step.
+    const stepProgressCounts = await getBenefitActionProgressPartnerCounts(prisma);
 
     // The trail belongs to the organisation, so it needs the selected member's
     // organisation and cannot join the batch above.
     const benefitAuditTrail = selectedMember?.organisationId
       ? await getAdminBenefitAuditTrail(selectedMember.organisationId)
       : [];
+
+    // Same shape for the partner's benefit notes and step progress:
+    // organisation-scoped, so resolvable only once a member is selected.
+    const partnerNotes = selectedMember?.organisationId
+      ? await getBenefitPartnerNotesForOrganisation(
+          prisma,
+          selectedMember.organisationId,
+        )
+      : {};
+
+    const partnerProgress = selectedMember?.organisationId
+      ? await getBenefitActionProgressForOrganisation(
+          prisma,
+          selectedMember.organisationId,
+        )
+      : {};
 
     const payingRevenue = computeRevenueFromTiers(summary.tiers);
 
@@ -139,8 +178,13 @@ export default async function MembershipDashboardPage(props: Props) {
         selectedUserId={selectedUserId}
         selectedMember={selectedMember}
         benefits={benefits}
+        editorBenefits={editorBenefits}
+        tierOptions={tierOptions}
         benefitStats={benefitStats}
         benefitAuditTrail={benefitAuditTrail}
+        partnerNotes={partnerNotes}
+        partnerProgress={partnerProgress}
+        stepProgressCounts={stepProgressCounts}
         initialTab={tab}
         handbook={handbook}
       />
