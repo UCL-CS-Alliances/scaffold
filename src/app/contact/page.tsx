@@ -330,7 +330,7 @@ export default function ContactPage() {
                 style={{ width: "100%" }}
               />
               <p id="human-check-hint" style={{ marginTop: "0.25rem" }}>
-                Enter the correct answer<strong>as a number</strong> to enable sending.
+                Enter the correct answer <strong>as a number</strong> to enable sending.
               </p>
             </label>
 

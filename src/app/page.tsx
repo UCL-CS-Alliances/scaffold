@@ -48,7 +48,7 @@ export default function HomePage() {
                     className="spotlight stack"
                     style={{ "--stack-gap": ".5rem" } as CSSProperties}
                   >
-                    <h4 className="spotlight-title">Service spotlight</h4>
+                    <div aria-hidden="true" style={{ height: "0.5rem" }} />
                     <ul className="spotlight-pills">
                       {spotlights.map((svc) => (
                         <li key={svc.slug}>
