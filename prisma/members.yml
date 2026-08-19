@@ -12,7 +12,9 @@
     tier: platinum
     status: active
     expiry: 2026-03-05
-    manager: Tim Bodley-Scott
+    # Email of an admin user seeded below; assigned as the organisation's
+    # client experience manager after all users exist.
+    manager_email: admin@alliances.example.com
   redeemed_benefits: [B03, B08]
 
 - id: microsoft

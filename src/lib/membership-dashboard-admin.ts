@@ -176,7 +176,7 @@ export async function getAdminSelectedMember(userId: string): Promise<AdminSelec
     membershipTierKey: membership?.tierKey ?? null,
     membershipTierRank: membership?.tierRank ?? null,
     membershipExpiry: membership?.expiry ?? null,
-    membershipManagerName: membership?.managerName ?? null,
+    membershipManagerName: membership?.clientExperienceManager?.name ?? null,
     membershipStatus: membership?.status ?? null,
     organisationId: user.organisationId,
 

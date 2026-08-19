@@ -123,7 +123,7 @@ export async function getMemberDashboardData(
     membershipTierKey: membership?.tierKey ?? null,
     membershipTierRank: membership?.tierRank ?? null,
     membershipExpiry: membership?.expiry ?? null,
-    membershipManagerName: membership?.managerName ?? null,
+    membershipManagerName: membership?.clientExperienceManager?.name ?? null,
     redeemedBenefitCodes,
   };
 }

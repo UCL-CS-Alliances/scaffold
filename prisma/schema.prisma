@@ -40,6 +40,9 @@ model User {
 
   // No memberships relation: a user's membership is their organisation's.
 
+  // Memberships this admin manages as client experience manager.
+  managedMemberships Membership[] @relation("MembershipClientExperienceManager")
+
   // Auth models
   accounts Account[]
   sessions Session[]
@@ -125,12 +128,18 @@ model Membership {
   isActive Boolean @default(true)
 
   // Mirrors YAML fields
-  status      String    @default("active")
-  managerName String?
-  expiry      DateTime?
+  status String    @default("active")
+  expiry DateTime?
+
+  // The client experience manager, assigned from the platform's ADMIN users.
+  // SET NULL so the membership survives its manager's account deletion, the
+  // same way AuditLog.actorId does.
+  clientExperienceManager   User?   @relation("MembershipClientExperienceManager", fields: [clientExperienceManagerId], references: [id], onDelete: SetNull)
+  clientExperienceManagerId String?
 
   // No @@index([organisationId]) — the unique index above already covers it.
   @@index([membershipTierId])
+  @@index([clientExperienceManagerId])
 }
 
 // APP REGISTRY & ACCESS RULES

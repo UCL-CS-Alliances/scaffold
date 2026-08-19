@@ -2,21 +2,18 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
-import {
-  getSatTeamManager,
-  resolveManagerByName,
-} from "@/content/contactRouting";
+import { useEffect, useState } from "react";
+import { getSatTeamManager } from "@/content/contactRouting";
 
 type DefaultsResponse = {
   isAuthenticated: boolean;
-  defaultManagerName: string;
+  defaultManagerCalendlyUrl: string;
 };
 
 export default function SecondaryNav() {
   const [loading, setLoading] = useState(true);
-  const [defaultManagerName, setDefaultManagerName] = useState<string>(
-    "Strategic Alliances Team",
+  const [calendlyUrl, setCalendlyUrl] = useState<string>(
+    getSatTeamManager().calendlyUrl,
   );
 
   useEffect(() => {
@@ -25,19 +22,18 @@ export default function SecondaryNav() {
     async function load() {
       setLoading(true);
       try {
-        // Reuse the same defaults endpoint used by the contact page.
+        // Reuse the same defaults endpoint used by the contact page; it
+        // resolves the organisation's assigned manager server-side.
         const res = await fetch("/api/contact/defaults", { cache: "no-store" });
         const data = (await res.json()) as DefaultsResponse;
 
         if (cancelled) return;
 
-        if (data?.isAuthenticated && data.defaultManagerName) {
-          setDefaultManagerName(data.defaultManagerName);
-        } else {
-          setDefaultManagerName("Strategic Alliances Team");
-        }
+        setCalendlyUrl(
+          data?.defaultManagerCalendlyUrl || getSatTeamManager().calendlyUrl,
+        );
       } catch {
-        if (!cancelled) setDefaultManagerName("Strategic Alliances Team");
+        if (!cancelled) setCalendlyUrl(getSatTeamManager().calendlyUrl);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -49,11 +45,6 @@ export default function SecondaryNav() {
       cancelled = true;
     };
   }, []);
-
-  const calendlyUrl = useMemo(() => {
-    const manager = resolveManagerByName(defaultManagerName);
-    return (manager ?? getSatTeamManager()).calendlyUrl;
-  }, [defaultManagerName]);
 
   return (
     <nav

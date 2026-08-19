@@ -29,7 +29,9 @@ type RawMember = {
     tier: 'bronze' | 'silver' | 'gold' | 'platinum';
     status: 'active' | 'inactive';
     expiry?: string | Date;
-    manager?: string;
+    // Email of an ADMIN user, resolved to the organisation's client
+    // experience manager once every user has been seeded.
+    manager_email?: string;
   };
   // Further contacts at the same organisation, beyond the main one in
   // `company`. They share the organisation's tier — membership is a property of
@@ -487,7 +489,6 @@ async function main() {
       membershipTierId: tierId,
       isActive,
       status: m.membership.status,
-      managerName: m.membership.manager ?? null,
       expiry,
     };
 
@@ -554,8 +555,51 @@ async function main() {
 
   await seedAppAccessRules(apps, tierIdByYaml);
   await seedDemoUsers(apps, roleIdByKey);
+  await seedClientExperienceManagers(rawMembers);
 
   console.log('\nSeeding complete ✅');
+}
+
+// Runs after every user exists — the admins a manager_email can name are
+// seeded in seedDemoUsers, *after* the member loop that creates the
+// memberships. Sets or clears the assignment explicitly, so a reseed
+// converges regardless of prior state (CI runs the seed twice).
+async function seedClientExperienceManagers(rawMembers: RawMember[]) {
+  console.log('\nAssigning client experience managers…');
+
+  for (const m of rawMembers) {
+    const organisation = await prisma.organisation.findUnique({
+      where: { slug: m.id },
+      select: { id: true },
+    });
+    if (!organisation) continue;
+
+    let managerId: string | null = null;
+    if (m.membership.manager_email) {
+      const candidate = await prisma.user.findFirst({
+        where: {
+          email: m.membership.manager_email,
+          roles: { some: { role: { key: 'ADMIN' } } },
+        },
+        select: { id: true },
+      });
+      if (!candidate) {
+        console.warn(
+          `  ! manager_email ${m.membership.manager_email} for "${m.id}" is not an ADMIN user; leaving unassigned`,
+        );
+      }
+      managerId = candidate?.id ?? null;
+    }
+
+    await prisma.membership.update({
+      where: { organisationId: organisation.id },
+      data: { clientExperienceManagerId: managerId },
+    });
+
+    if (managerId) {
+      console.log(`  - ${m.id}: ${m.membership.manager_email}`);
+    }
+  }
 }
 
 main()

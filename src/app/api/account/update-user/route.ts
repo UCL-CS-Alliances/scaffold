@@ -38,7 +38,7 @@ type UserAuditSnapshot = {
     organisationId: number;
     isActive: boolean;
     status: string;
-    managerName: string | null;
+    clientExperienceManager: { id: string; name: string; email: string } | null;
     expiry: string | null;
   } | null;
 };
@@ -73,7 +73,9 @@ async function getUserAuditSnapshot(
               organisationId: true,
               isActive: true,
               status: true,
-              managerName: true,
+              clientExperienceManager: {
+                select: { id: true, firstName: true, lastName: true, email: true },
+              },
               expiry: true,
             },
           },
@@ -101,7 +103,15 @@ async function getUserAuditSnapshot(
           organisationId: membership.organisationId,
           isActive: membership.isActive,
           status: membership.status,
-          managerName: membership.managerName,
+          // Name and email, not just the id: the audit trail should read
+          // without a join against a user table that may since have changed.
+          clientExperienceManager: membership.clientExperienceManager
+            ? {
+                id: membership.clientExperienceManager.id,
+                name: `${membership.clientExperienceManager.firstName} ${membership.clientExperienceManager.lastName}`,
+                email: membership.clientExperienceManager.email,
+              }
+            : null,
           expiry: membership.expiry ? membership.expiry.toISOString() : null,
         }
       : null,
@@ -422,13 +432,46 @@ export async function POST(req: Request) {
           throw new Error("To assign a membership tier, the user must have an organisation set.");
         }
 
+        // Client experience managers are assigned from the platform's admins.
+        // Re-validated only when the assignment changes, so an admin who was
+        // demoted after being assigned does not block unrelated saves.
+        const rawCemId = admin.membership.clientExperienceManagerId;
+        let cemId =
+          typeof rawCemId === "string" && rawCemId.trim() ? rawCemId.trim() : null;
+
+        // A membership being created by a client that omitted the field gets
+        // the acting admin as its manager — the server-side twin of the
+        // profile form's default. An explicit null ("—") is respected.
+        if (
+          !cemId &&
+          !before?.membership &&
+          !("clientExperienceManagerId" in admin.membership)
+        ) {
+          cemId = String(me.id);
+        }
+        let cemUser: { id: string; firstName: string; lastName: string } | null = null;
+        if (cemId) {
+          cemUser = await tx.user.findFirst({
+            where: { id: cemId, roles: { some: { role: { key: "ADMIN" } } } },
+            select: { id: true, firstName: true, lastName: true },
+          });
+          if (!cemUser) {
+            if (cemId !== (before?.membership?.clientExperienceManager?.id ?? null)) {
+              throw new Error("The client experience manager must be an admin user.");
+            }
+            // Unchanged but since demoted: keep the assignment (null if deleted).
+            cemUser = await tx.user.findUnique({
+              where: { id: cemId },
+              select: { id: true, firstName: true, lastName: true },
+            });
+          }
+        }
+
         const membershipFields = {
           membershipTierId: resolvedMembershipTierId,
           isActive: Boolean(admin.membership.isActive),
           status: String(admin.membership.status ?? "active"),
-          managerName: admin.membership.managerName
-            ? String(admin.membership.managerName)
-            : null,
+          clientExperienceManagerId: cemUser?.id ?? null,
           expiry,
         };
 

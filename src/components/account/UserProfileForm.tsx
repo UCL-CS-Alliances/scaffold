@@ -11,6 +11,7 @@ type Meta = {
   roles: { id: number; key: string; label: string }[];
   tiers: { id: number; key: string; label: string; rank: number }[];
   apps: { id: number; key: string; name: string }[];
+  admins: { id: string; name: string }[];
 };
 
 type AppsMeta = { apps: { id: number; key: string; name: string }[] };
@@ -112,7 +113,10 @@ export default function UserProfileForm(props: {
   // Membership (admin-only)
   const [membershipTierId, setMembershipTierId] = useState<number | null>(null);
   const [membershipStatus, setMembershipStatus] = useState<string>("active");
-  const [membershipManagerName, setMembershipManagerName] = useState<string>("");
+  const [membershipManagerId, setMembershipManagerId] = useState<string | null>(null);
+  // The stored assignment as loaded, kept separately so it still renders as an
+  // option when its admin is no longer in meta.admins (demoted since).
+  const [loadedManager, setLoadedManager] = useState<{ id: string; name: string } | null>(null);
   const [membershipExpiryText, setMembershipExpiryText] = useState<string>(""); // dd/mm/yyyy
 
   // Pending additions (admin-only)
@@ -229,64 +233,75 @@ export default function UserProfileForm(props: {
     lastAppliedPresetAppIdRef.current = presetDefaultAppId;
   }, [presetDefaultAppId]);
 
-  useEffect(() => {
-    async function load() {
-      setMessage(null);
-      setLoading(true);
+  // Also called after a successful save (background: true, so the form is not
+  // blanked by the loading state) — an organisation move means the membership
+  // fields now describe a different organisation, and only a re-fetch has them.
+  async function loadUser(opts?: { background?: boolean }) {
+    setMessage(null);
+    if (!opts?.background) setLoading(true);
 
-      try {
-        const qs = `?userId=${encodeURIComponent(targetUserId)}`;
-        const r = await fetch(`/api/account/get-user${qs}`, { method: "GET" });
-        if (!r.ok) throw new Error("Failed to load user.");
+    try {
+      const qs = `?userId=${encodeURIComponent(targetUserId)}`;
+      const r = await fetch(`/api/account/get-user${qs}`, { method: "GET" });
+      if (!r.ok) throw new Error("Failed to load user.");
 
-        const data = await r.json();
+      const data = await r.json();
 
-        setFirstName(data.user.firstName ?? "");
-        setLastName(data.user.lastName ?? "");
-        setEmail(data.user.email ?? "");
-        setJobTitle(data.user.jobTitle ?? "");
-        setIsPrimaryContact(Boolean(data.user.isPrimaryContact));
+      setFirstName(data.user.firstName ?? "");
+      setLastName(data.user.lastName ?? "");
+      setEmail(data.user.email ?? "");
+      setJobTitle(data.user.jobTitle ?? "");
+      setIsPrimaryContact(Boolean(data.user.isPrimaryContact));
 
-        setDefaultAppId(data.user.defaultAppId ?? null);
-        setDefaultAppTouched(false);
-        lastAppliedPresetAppIdRef.current = null;
+      setDefaultAppId(data.user.defaultAppId ?? null);
+      setDefaultAppTouched(false);
+      lastAppliedPresetAppIdRef.current = null;
 
-        // Clear pending items when switching targets
-        setPendingOrgs([]);
-        setPendingRoles([]);
+      // Clear pending items when switching targets
+      setPendingOrgs([]);
+      setPendingRoles([]);
 
-        setPwCurrent("");
-        setPwNext("");
-        setPwMessage(null);
+      setPwCurrent("");
+      setPwNext("");
+      setPwMessage(null);
 
-        // Temp password only belongs to redirected user; keep if present, otherwise clear
-        setTempPassword(initialTempPassword ?? null);
+      // Temp password only belongs to redirected user; keep if present, otherwise clear
+      setTempPassword(initialTempPassword ?? null);
 
-        if (isAdmin) {
-          if (data.user.organisationId) {
-            setOrganisationChoice({ kind: "existing", id: data.user.organisationId });
-          } else {
-            setOrganisationChoice(null);
-          }
-
-          const keys: string[] = data.user.roleKeys ?? [];
-          setRoleChoices(keys.map((k) => ({ kind: "existing", key: k })));
-
-          setLoadedOrganisationId(data.user.organisationId ?? null);
-
-          setMembershipTierId(data.membershipEdit?.membershipTierId ?? null);
-          setMembershipStatus((data.membershipEdit?.status ?? "active") || "active");
-          setMembershipManagerName(data.membershipEdit?.managerName ?? "");
-          setMembershipExpiryText(data.membershipEdit?.expiryText ?? "");
+      if (isAdmin) {
+        if (data.user.organisationId) {
+          setOrganisationChoice({ kind: "existing", id: data.user.organisationId });
+        } else {
+          setOrganisationChoice(null);
         }
-      } catch (e: any) {
-        setMessage(e?.message ?? "Could not load user.");
-      } finally {
-        setLoading(false);
-      }
-    }
 
-    void load();
+        const keys: string[] = data.user.roleKeys ?? [];
+        setRoleChoices(keys.map((k) => ({ kind: "existing", key: k })));
+
+        setLoadedOrganisationId(data.user.organisationId ?? null);
+
+        setMembershipTierId(data.membershipEdit?.membershipTierId ?? null);
+        setMembershipStatus((data.membershipEdit?.status ?? "active") || "active");
+        // No membership row yet means the next save creates one, so default
+        // its manager to the admin doing the creating — still overridable
+        // from the dropdown before saving.
+        setMembershipManagerId(
+          data.membershipEdit
+            ? data.membershipEdit.clientExperienceManager?.id ?? null
+            : meId,
+        );
+        setLoadedManager(data.membershipEdit?.clientExperienceManager ?? null);
+        setMembershipExpiryText(data.membershipEdit?.expiryText ?? "");
+      }
+    } catch (e: any) {
+      setMessage(e?.message ?? "Could not load user.");
+    } finally {
+      if (!opts?.background) setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadUser();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetUserId, isAdmin]);
 
@@ -523,14 +538,14 @@ export default function UserProfileForm(props: {
             ? {
                 membershipTierId,
                 status: (membershipStatus || "active").trim() || "active",
-                managerName: membershipManagerName.trim() || null,
+                clientExperienceManagerId: membershipManagerId,
                 expiryText: membershipExpiryText.trim() || null,
                 isActive: derivedIsActive,
               }
             : {
                 membershipTierId: null,
                 status: null,
-                managerName: null,
+                clientExperienceManagerId: null,
                 expiryText: null,
                 isActive: true,
               },
@@ -562,11 +577,12 @@ export default function UserProfileForm(props: {
       // stays under their previous organisation's group until a reload.
       router.refresh();
 
-      // The move has landed, so this is the contact's organisation now — clears
-      // the "being moved" notice and restores the membership fields.
-      if (organisationChoice?.kind === "existing") {
-        setLoadedOrganisationId(organisationChoice.id);
-      }
+      // Reload the saved profile so the form reflects what the server now
+      // holds. After an organisation move the membership fields belong to the
+      // destination organisation — without this they keep showing the origin's
+      // tier, manager and expiry, and a second save would write those against
+      // the new organisation.
+      await loadUser({ background: true });
 
       setMessage("Saved.");
     } catch {
@@ -801,16 +817,28 @@ export default function UserProfileForm(props: {
               </div>
 
               <div className="auth-field">
-                <label className="auth-label" htmlFor="managerName">
+                <label className="auth-label" htmlFor="managerId">
                   Client experience manager
                 </label>
-                <input
-                  id="managerName"
+                <select
+                  id="managerId"
                   className="auth-input"
-                  value={membershipManagerName}
-                  onChange={(e) => setMembershipManagerName(e.target.value)}
-                  placeholder="Optional"
-                />
+                  value={membershipManagerId ?? ""}
+                  onChange={(e) => setMembershipManagerId(e.target.value || null)}
+                >
+                  <option value="">—</option>
+                  {meta.admins.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                  {loadedManager &&
+                    !meta.admins.some((a) => a.id === loadedManager.id) && (
+                      <option value={loadedManager.id}>
+                        {loadedManager.name} (no longer an admin)
+                      </option>
+                    )}
+                </select>
               </div>
 
               <div className="auth-field">

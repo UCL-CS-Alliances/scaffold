@@ -12,6 +12,7 @@ type Meta = {
   roles: { id: number; key: string; label: string }[];
   tiers: { id: number; key: string; label: string; rank: number }[];
   apps: { id: number; key: string; name: string }[];
+  admins: { id: string; name: string }[];
 };
 
 type AppsMeta = { apps: { id: number; key: string; name: string }[] };
