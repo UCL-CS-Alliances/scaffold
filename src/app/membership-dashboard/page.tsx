@@ -27,6 +27,7 @@ import {
   getBenefitCatalogue,
   getBenefitCatalogueForEditor,
   getBenefitPartnerNotesForOrganisation,
+  getOpenBenefitRequestsForOrganisation,
 } from "@/lib/benefits";
 
 type Props = {
@@ -148,6 +149,16 @@ export default async function MembershipDashboardPage(props: Props) {
         )
       : {};
 
+    // The partner's open benefit requests, resolved once here and threaded
+    // down — never re-resolved further down the tree on this force-dynamic,
+    // connection_limit=1 page.
+    const partnerOpenRequests = selectedMember?.organisationId
+      ? await getOpenBenefitRequestsForOrganisation(
+          prisma,
+          selectedMember.organisationId,
+        )
+      : {};
+
     const payingRevenue = computeRevenueFromTiers(summary.tiers);
 
     const top = benefitStats
@@ -184,6 +195,7 @@ export default async function MembershipDashboardPage(props: Props) {
         benefitAuditTrail={benefitAuditTrail}
         partnerNotes={partnerNotes}
         partnerProgress={partnerProgress}
+        partnerOpenRequests={partnerOpenRequests}
         stepProgressCounts={stepProgressCounts}
         initialTab={tab}
         handbook={handbook}
