@@ -1,10 +1,23 @@
 // src/lib/membership-dashboard-actions.ts
 "use server";
 
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { recordAuditLog } from "@/lib/audit-log";
+import {
+  getBenefitCatalogue,
+  OPEN_BENEFIT_REQUEST_STATUSES,
+} from "@/lib/benefits";
+import {
+  getMembershipForOrganisation,
+  getRedeemedBenefitCodesForOrganisation,
+} from "@/lib/membership";
+import {
+  hasBenefitAccess,
+  resolveMemberRank,
+  getSupersedingBenefit,
+} from "@/lib/benefit-access";
 
 function requireAdmin(roleKeys: unknown) {
   const keys = Array.isArray(roleKeys) ? roleKeys : [];
@@ -345,4 +358,240 @@ export async function saveBenefitRedemptionAction(input: {
       actorEmail,
     });
   });
+}
+
+export type RequestBenefitResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | "UNAUTHENTICATED"
+        | "NO_ORGANISATION"
+        | "UNKNOWN_BENEFIT"
+        | "NOT_ELIGIBLE"
+        | "SUPERSEDED"
+        | "ALREADY_REDEEMED"
+        | "ALREADY_REQUESTED"
+        | "NOTE_REQUIRED"
+        | "TOO_LONG";
+      message: string;
+    };
+
+const REQUEST_NOTE_MAX = 2000;
+const REQUEST_OPTIONAL_FIELD_MAX = 200;
+
+/**
+ * A member registers their organisation's interest in a benefit — the first
+ * member-facing (non-admin) mutation in this file. It does NOT mark the
+ * benefit redeemed: "redeemed" still means fully delivered, set by the client
+ * experience manager. The request is the organisation's, like redemption —
+ * one open request per (organisation, benefit), whoever raised it, enforced
+ * by the partial unique index the P2002 catch below maps to a result.
+ *
+ * This is the first action in the file that returns a typed result instead of
+ * throwing, deliberately: the admin actions throw because their callers can
+ * act on a raw message, but Next.js masks thrown error messages in
+ * production, so a member would see "An error occurred" instead of "a
+ * colleague has already requested this". Genuinely exceptional conditions (a
+ * database failure) still throw.
+ *
+ * Two absences are decisions, not oversights: no audit row — the request row
+ * itself carries actor, timestamp and content, so creation is
+ * self-documenting, and AuditLog earns its place when sub-issue F adds
+ * transitions (sub-issue H owns auditing them) — and no rate limiting: the
+ * partial unique index makes duplicates impossible, every request needs a
+ * written note, and the only in-repo limiter (api/contact/submit) is
+ * documented as single-process-only and must not be copied into a server
+ * action.
+ */
+export async function requestBenefitRedemptionAction(input: {
+  benefitCode: string;
+  note: string;
+  preferredTimeframe?: string;
+  contactPreference?: string;
+}): Promise<RequestBenefitResult> {
+  const session = await getServerAuthSession();
+  const userId = session?.user?.id ?? null;
+  if (!userId) {
+    return {
+      ok: false,
+      reason: "UNAUTHENTICATED",
+      message: "Sign in to request a benefit.",
+    };
+  }
+
+  const note = String(input.note ?? "").trim();
+  const preferredTimeframe =
+    String(input.preferredTimeframe ?? "").trim() || null;
+  const contactPreference = String(input.contactPreference ?? "").trim() || null;
+
+  if (!note) {
+    return {
+      ok: false,
+      reason: "NOTE_REQUIRED",
+      message: "Please tell us what you would like — the note is required.",
+    };
+  }
+  if (note.length > REQUEST_NOTE_MAX) {
+    return {
+      ok: false,
+      reason: "TOO_LONG",
+      message: `The note can be at most ${REQUEST_NOTE_MAX} characters.`,
+    };
+  }
+  if (
+    (preferredTimeframe?.length ?? 0) > REQUEST_OPTIONAL_FIELD_MAX ||
+    (contactPreference?.length ?? 0) > REQUEST_OPTIONAL_FIELD_MAX
+  ) {
+    return {
+      ok: false,
+      reason: "TOO_LONG",
+      message: `The timeframe and contact fields can each be at most ${REQUEST_OPTIONAL_FIELD_MAX} characters.`,
+    };
+  }
+
+  try {
+    return await prisma.$transaction(
+      async (tx): Promise<RequestBenefitResult> => {
+        // The organisation comes from the user's own record, never from the
+        // client — a member can only ever request for their organisation.
+        const user = await tx.user.findUnique({
+          where: { id: userId },
+          select: { organisationId: true },
+        });
+        if (!user?.organisationId) {
+          return {
+            ok: false,
+            reason: "NO_ORGANISATION",
+            message:
+              "Your account is not linked to a partner organisation, so there is no membership to request against.",
+          };
+        }
+        const organisationId = user.organisationId;
+
+        // The ACTIVE catalogue, not getKnownBenefitCodes: that set includes
+        // retired benefits so an admin can clear a stale redemption, but a
+        // withdrawn benefit must not be requestable — its detail page 404s.
+        const benefits = await getBenefitCatalogue(tx);
+        const benefit = benefits.find((b) => b.id === input.benefitCode);
+        if (!benefit) {
+          return {
+            ok: false,
+            reason: "UNKNOWN_BENEFIT",
+            message: "This benefit is not available to request.",
+          };
+        }
+
+        // Eligibility from the database — the session's tier claims are
+        // display-only and go stale the moment a tier changes.
+        const membership = await getMembershipForOrganisation(
+          tx,
+          organisationId,
+        );
+        const memberRank = membership
+          ? resolveMemberRank(membership.tierRank, membership.tierKey)
+          : null;
+        if (!hasBenefitAccess(memberRank, benefit.tierMinRank)) {
+          return {
+            ok: false,
+            reason: "NOT_ELIGIBLE",
+            message:
+              "This benefit is not included in your organisation's membership tier.",
+          };
+        }
+
+        // Mirrors the detail page's SUPERSEDED status, which never shows the
+        // request button — the server must agree or the UI gate is a hole.
+        const superseding = getSupersedingBenefit(
+          memberRank,
+          benefits,
+          benefit.id,
+        );
+        if (superseding) {
+          return {
+            ok: false,
+            reason: "SUPERSEDED",
+            message: `Your membership includes ${superseding.label}, which replaces this benefit — request that instead.`,
+          };
+        }
+
+        const redeemed = await getRedeemedBenefitCodesForOrganisation(
+          tx,
+          organisationId,
+        );
+        if (redeemed.includes(benefit.id)) {
+          return {
+            ok: false,
+            reason: "ALREADY_REDEEMED",
+            message: "Your organisation has already redeemed this benefit.",
+          };
+        }
+
+        const benefitRow = await tx.benefit.findUnique({
+          where: { code: benefit.id },
+          select: { id: true },
+        });
+        if (!benefitRow) {
+          // The catalogue resolved it moments ago; vanishing mid-transaction
+          // is genuinely exceptional.
+          throw new Error(`Benefit ${benefit.id} no longer exists.`);
+        }
+
+        const existing = await tx.benefitRedemptionRequest.findFirst({
+          where: {
+            organisationId,
+            benefitId: benefitRow.id,
+            status: { in: [...OPEN_BENEFIT_REQUEST_STATUSES] },
+          },
+          select: {
+            requestedAt: true,
+            requestedBy: { select: { firstName: true, lastName: true } },
+          },
+        });
+        if (existing) {
+          const who = existing.requestedBy
+            ? `${existing.requestedBy.firstName} ${existing.requestedBy.lastName}`
+            : "A colleague";
+          const when = new Intl.DateTimeFormat("en-GB", {
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          }).format(existing.requestedAt);
+          return {
+            ok: false,
+            reason: "ALREADY_REQUESTED",
+            message: `${who} already requested this for your organisation on ${when}.`,
+          };
+        }
+
+        await tx.benefitRedemptionRequest.create({
+          data: {
+            organisationId,
+            benefitId: benefitRow.id,
+            note,
+            preferredTimeframe,
+            contactPreference,
+            requestedById: userId,
+          },
+        });
+
+        return { ok: true };
+      },
+    );
+  } catch (error) {
+    // The partial unique index closing the race two concurrent submissions
+    // (or a double-click replay) can win: the loser's create lands here and
+    // must read as "already requested", not as a crash.
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return {
+        ok: false,
+        reason: "ALREADY_REQUESTED",
+        message: "This benefit has already been requested for your organisation.",
+      };
+    }
+    throw error;
+  }
 }

@@ -11,28 +11,53 @@ import {
   getBenefitPartnerNotesForOrganisation,
   type BenefitActionProgressMap,
   type CatalogueBenefit,
+  type OrganisationBenefitRequest,
 } from "@/lib/benefits";
 import prisma from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { getMemberDashboardData } from "@/lib/membership-dashboard";
 import SecondaryNav from "@/components/membership-dashboard/SecondaryNav";
+import BenefitRequestDialog from "@/components/membership-dashboard/BenefitRequestDialog";
 
 type PageProps = {
   params: Promise<{ benefitId: string }>;
 };
 
-type BenefitStatus = "REDEEMED" | "SUPERSEDED" | "HAS_ACCESS" | "NO_ACCESS";
+type BenefitStatus =
+  | "REDEEMED"
+  | "REQUESTED"
+  | "ACKNOWLEDGED"
+  | "IN_PROGRESS"
+  | "SUPERSEDED"
+  | "HAS_ACCESS"
+  | "NO_ACCESS";
 
-// Precedence matters: a superseded benefit the member has already redeemed is
-// still reported as redeemed, and tier access is still checked first, so the
-// only status this adds is "eligible, unredeemed, but replaced by a better one".
+// Precedence matters, and the order is deliberate: tier access first, then
+// redeemed — a redeemed benefit stays "Redeemed" whatever else is true — then
+// any open request, then superseded. The open request sits AHEAD of
+// superseded because it is a live fact about this benefit (someone at the
+// organisation has actually asked for it), whereas supersede is advice about
+// a better one — advice must not hide a request already in flight.
 function determineStatus(
   hasAccess: boolean,
   isRedeemed: boolean,
+  openRequest: OrganisationBenefitRequest | null,
   isSuperseded: boolean,
 ): BenefitStatus {
   if (!hasAccess) return "NO_ACCESS";
   if (isRedeemed) return "REDEEMED";
+  if (openRequest) {
+    switch (openRequest.status) {
+      case "REQUESTED":
+        return "REQUESTED";
+      case "ACKNOWLEDGED":
+        return "ACKNOWLEDGED";
+      case "IN_PROGRESS":
+        return "IN_PROGRESS";
+      // CLOSED never reaches here — the resolver returns open requests only —
+      // but fall through to the ordinary statuses rather than lie if it does.
+    }
+  }
   if (isSuperseded) return "SUPERSEDED";
   return "HAS_ACCESS";
 }
@@ -41,6 +66,12 @@ function getStatusMeta(status: BenefitStatus) {
   switch (status) {
     case "REDEEMED":
       return { symbol: "✅", label: "Redeemed" };
+    case "REQUESTED":
+      return { symbol: "⏳", label: "Requested" };
+    case "ACKNOWLEDGED":
+      return { symbol: "📬", label: "Acknowledged" };
+    case "IN_PROGRESS":
+      return { symbol: "🔧", label: "Working on it" };
     case "SUPERSEDED":
       return { symbol: "⬆️", label: "Replaced by an upgraded benefit" };
     case "HAS_ACCESS":
@@ -79,6 +110,9 @@ export default async function BenefitPage({ params }: PageProps) {
   // The organisation's admin-recorded progress through this benefit's steps,
   // keyed by step id. Read-only here — members see it, never change it.
   let progress: BenefitActionProgressMap = {};
+  // The organisation's open request for this benefit, if one exists — a
+  // colleague's request is the same request, so every contact sees it.
+  let openRequest: OrganisationBenefitRequest | null = null;
 
   const session = await getServerAuthSession();
 
@@ -95,6 +129,7 @@ export default async function BenefitPage({ params }: PageProps) {
       hasAccess = hasBenefitAccess(myRank, benefit.tierMinRank);
       isRedeemed = memberData.redeemedBenefitCodes.includes(id);
       supersededBy = getSupersedingBenefit(myRank, benefits, benefit.id);
+      openRequest = memberData.openBenefitRequests[id] ?? null;
 
       if (memberData.organisationId != null) {
         const notes = await getBenefitPartnerNotesForOrganisation(
@@ -111,8 +146,22 @@ export default async function BenefitPage({ params }: PageProps) {
     }
   }
 
-  const status = determineStatus(hasAccess, isRedeemed, supersededBy != null);
+  const status = determineStatus(
+    hasAccess,
+    isRedeemed,
+    openRequest,
+    supersededBy != null,
+  );
   const { symbol, label } = getStatusMeta(status);
+
+  // Process, terms and the back link stay on the page throughout the request
+  // ladder: has access, not redeemed, not superseded. Gating them on
+  // HAS_ACCESS alone would make them vanish the moment a member requests.
+  const showProcessAndTerms =
+    status === "HAS_ACCESS" ||
+    status === "REQUESTED" ||
+    status === "ACKNOWLEDGED" ||
+    status === "IN_PROGRESS";
 
   const backHref = "/membership-dashboard/";
 
@@ -224,6 +273,62 @@ export default async function BenefitPage({ params }: PageProps) {
             Coordinate next steps with your client experience manager.
           </p>
         )}
+
+        {status === "REQUESTED" && openRequest && (
+          <>
+            <p>
+              {openRequest.requestedByName ?? "A colleague"} requested this
+              benefit for your organisation on{" "}
+              {new Intl.DateTimeFormat("en-GB", {
+                dateStyle: "medium",
+              }).format(openRequest.requestedAt)}
+              . Your client experience manager will be in touch to arrange the
+              next steps — there is nothing more you need to do. To change or
+              withdraw the request, speak to your manager directly.
+            </p>
+
+            {/* Echo what was submitted, so the member can see what their
+                organisation asked for without having to remember it. */}
+            <div
+              className="tile"
+              style={{ marginTop: "0.75rem", padding: "0.75rem 1rem" }}
+            >
+              <p className="small" style={{ margin: 0 }}>
+                <strong>The request</strong>
+              </p>
+              <p style={{ whiteSpace: "pre-wrap", margin: "0.25rem 0 0" }}>
+                {openRequest.note}
+              </p>
+              {openRequest.preferredTimeframe && (
+                <p className="small" style={{ margin: "0.5rem 0 0" }}>
+                  Preferred timeframe: {openRequest.preferredTimeframe}
+                </p>
+              )}
+              {openRequest.contactPreference && (
+                <p className="small" style={{ margin: "0.25rem 0 0" }}>
+                  Best contact: {openRequest.contactPreference}
+                </p>
+              )}
+            </div>
+          </>
+        )}
+
+        {status === "ACKNOWLEDGED" && (
+          <p>
+            Your client experience manager has acknowledged your
+            organisation&apos;s request for this benefit. The next steps are
+            the benefit&apos;s process actions below — your organisation&apos;s
+            progress through them is shown as the team records it.
+          </p>
+        )}
+
+        {status === "IN_PROGRESS" && (
+          <p>
+            Your client experience manager is working on your
+            organisation&apos;s request for this benefit. Progress through the
+            process steps below is recorded as it happens.
+          </p>
+        )}
       </section>
 
       {/* Partner note: written by the SAT about this organisation, rendered on
@@ -241,9 +346,27 @@ export default async function BenefitPage({ params }: PageProps) {
         </section>
       )}
 
-      {/* HAS ACCESS ONLY: process + terms */}
-      {status === "HAS_ACCESS" && (
+      {/* Available or requested (see showProcessAndTerms): process + terms */}
+      {showProcessAndTerms && (
         <>
+          {/* Request: its own block, deliberately NOT inside the trigger
+              section below — Benefit.trigger is nullable and admin-editable,
+              so parking the button there would let an admin clearing the
+              trigger text silently remove the only way to request. */}
+          {status === "HAS_ACCESS" && (
+            <section style={{ marginTop: "1.5rem" }}>
+              <h2>Request this benefit</h2>
+              <p>
+                Ready to use this benefit? Send your client experience manager
+                a request and they will arrange it with you.
+              </p>
+              <BenefitRequestDialog
+                benefitCode={benefit.id}
+                benefitLabel={benefit.label}
+              />
+            </section>
+          )}
+
           {/* Process */}
           {hasProcess && (
             <section className="benefit-process" style={{ marginTop: "1.5rem" }}>
@@ -254,16 +377,6 @@ export default async function BenefitPage({ params }: PageProps) {
                 <section style={{ marginTop: "1rem" }}>
                   <h3>Trigger</h3>
                   <p>{process.trigger}</p>
-                  <button
-                    type="button"
-                    className="button-link button-link--primary"
-                    disabled
-                    aria-disabled="true"
-                    title="This action will be enabled in a future release."
-                    style={{ marginTop: "0.5rem" }}
-                  >
-                    Redeem benefit now
-                  </button>
                 </section>
               )}
 

@@ -4,7 +4,10 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
-import type { CatalogueBenefit } from "@/lib/benefits";
+import type {
+  CatalogueBenefit,
+  OrganisationBenefitRequest,
+} from "@/lib/benefits";
 import {
   getEffectiveBenefits,
   hasBenefitAccess,
@@ -26,12 +29,16 @@ type MemberDashboardProps = {
 
   redeemedBenefitCodes: string[];
 
+  // The organisation's open benefit requests, keyed by benefit code — a
+  // colleague's request shows here too.
+  openBenefitRequests: Record<string, OrganisationBenefitRequest>;
+
   // Resolved by the server component: this is a client component and cannot
   // read the catalogue itself.
   benefits: CatalogueBenefit[];
 };
 
-type BenefitFilter = "redeemed" | "available" | "locked" | null;
+type BenefitFilter = "redeemed" | "requested" | "available" | "locked" | null;
 
 export default function MemberDashboard(props: MemberDashboardProps) {
   const {
@@ -43,6 +50,7 @@ export default function MemberDashboard(props: MemberDashboardProps) {
     membershipExpiry,
     membershipManagerName,
     redeemedBenefitCodes,
+    openBenefitRequests,
     benefits,
   } = props;
 
@@ -72,7 +80,11 @@ export default function MemberDashboard(props: MemberDashboardProps) {
       ? membershipManagerName
       : getSatTeamManager().name;
 
-  // Build benefit rows with computed state
+  // Build benefit rows with computed state. Precedence: locked → redeemed →
+  // requested → available. All three open request statuses (requested /
+  // acknowledged / working on it) collapse into one "requested" row state for
+  // now — only REQUESTED is reachable today; when sub-issue F makes the
+  // others live, split on openBenefitRequests[b.id].status here.
   const benefitRows = useMemo(() => {
     return benefitsEffective.map((b) => {
       let state: Exclude<BenefitFilter, null> = "locked";
@@ -82,6 +94,9 @@ export default function MemberDashboard(props: MemberDashboardProps) {
         if (redeemed.has(b.id)) {
           state = "redeemed";
           symbol = "✅";
+        } else if (openBenefitRequests[b.id]) {
+          state = "requested";
+          symbol = "⏳";
         } else {
           state = "available";
           symbol = "🟡";
@@ -90,10 +105,10 @@ export default function MemberDashboard(props: MemberDashboardProps) {
 
       return { benefit: b, state, symbol };
     });
-  }, [benefitsEffective, myRank, redeemed]);
+  }, [benefitsEffective, myRank, redeemed, openBenefitRequests]);
 
   const counts = useMemo(() => {
-    const c = { redeemed: 0, available: 0, locked: 0 };
+    const c = { redeemed: 0, requested: 0, available: 0, locked: 0 };
     benefitRows.forEach((r) => {
       c[r.state] += 1;
     });

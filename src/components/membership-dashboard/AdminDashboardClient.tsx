@@ -8,6 +8,7 @@ import type {
   BenefitActionProgressMap,
   CatalogueBenefit,
   EditorBenefit,
+  OrganisationBenefitRequest,
 } from "@/lib/benefits";
 import type {
   AdminBenefitAuditEntry,
@@ -61,6 +62,19 @@ function benefitLabel(benefits: CatalogueBenefit[], code: string) {
   return benefits.find((b) => b.id === code)?.label ?? code;
 }
 
+// Only the open statuses ever reach this map — the resolver excludes CLOSED —
+// and only REQUESTED is written today; the other two are sub-issue F's.
+function requestStatusLabel(status: OrganisationBenefitRequest["status"]) {
+  switch (status) {
+    case "ACKNOWLEDGED":
+      return "Acknowledged";
+    case "IN_PROGRESS":
+      return "Working on it";
+    default:
+      return "Requested";
+  }
+}
+
 // Actor display for an audit entry; actorId is nulled when the admin account
 // is deleted, so fall back to the email denormalised into the record.
 function auditActorLabel(entry: AdminBenefitAuditEntry) {
@@ -91,6 +105,7 @@ export default function AdminDashboardClient(props: {
   benefitAuditTrail: AdminBenefitAuditEntry[];
   partnerNotes: Record<string, string>;
   partnerProgress: BenefitActionProgressMap;
+  partnerOpenRequests: Record<string, OrganisationBenefitRequest>;
   stepProgressCounts: Record<number, number>;
   initialTab?: string | null;
   handbook: HandbookRenderResult;
@@ -106,6 +121,7 @@ export default function AdminDashboardClient(props: {
     benefitAuditTrail,
     partnerNotes,
     partnerProgress,
+    partnerOpenRequests,
     stepProgressCounts,
     initialTab,
     handbook,
@@ -563,7 +579,80 @@ export default function AdminDashboardClient(props: {
               </>
             ) : (
               <>
-                <h3 style={{ marginTop: 0 }}>Benefit redemption checklist</h3>
+                {/* What was asked for, above what was delivered. Read-only:
+                    acknowledging and progressing requests is sub-issue F. */}
+                <h3 style={{ marginTop: 0 }}>Open benefit requests</h3>
+
+                {(() => {
+                  const openRequests = Object.values(partnerOpenRequests).sort(
+                    (a, b) =>
+                      new Date(b.requestedAt).getTime() -
+                      new Date(a.requestedAt).getTime(),
+                  );
+
+                  if (openRequests.length === 0) {
+                    return (
+                      <p className="small">
+                        No open benefit requests for this partner.
+                      </p>
+                    );
+                  }
+
+                  return (
+                    <ul className="list-plain">
+                      {openRequests.map((request) => (
+                        <li
+                          key={request.id}
+                          className="tile"
+                          style={{
+                            padding: ".6rem .75rem",
+                            marginBottom: ".5rem",
+                          }}
+                        >
+                          <div className="cluster" style={{ alignItems: "center" }}>
+                            <strong>
+                              {benefitLabel(benefits, request.benefitCode)}
+                            </strong>
+                            <span className="pill">
+                              {requestStatusLabel(request.status)}
+                            </span>
+                          </div>
+
+                          <div className="small" style={{ marginTop: ".25rem" }}>
+                            Requested by{" "}
+                            {request.requestedByName ?? "Unknown contact"} on{" "}
+                            {formatDateTimeGB(request.requestedAt)}
+                          </div>
+
+                          <p style={{ whiteSpace: "pre-wrap", margin: ".4rem 0 0" }}>
+                            {request.note}
+                          </p>
+
+                          {request.preferredTimeframe && (
+                            <p className="small" style={{ margin: ".4rem 0 0" }}>
+                              Preferred timeframe: {request.preferredTimeframe}
+                            </p>
+                          )}
+                          {request.contactPreference && (
+                            <p className="small" style={{ margin: ".25rem 0 0" }}>
+                              Best contact: {request.contactPreference}
+                            </p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  );
+                })()}
+
+                <p className="small">
+                  Acknowledging and progressing requests from here is planned
+                  for a later release — for now, action them with the partner
+                  directly.
+                </p>
+
+                <h3 style={{ marginTop: "1.5rem" }}>
+                  Benefit redemption checklist
+                </h3>
 
                 {selectedMember?.organisationId != null && (
                   <BenefitRedemptionChecklist

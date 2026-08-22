@@ -1,4 +1,5 @@
 // src/lib/benefits.ts
+import { BenefitRequestStatus } from "@prisma/client";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 /**
@@ -249,6 +250,81 @@ export async function getBenefitActionProgressPartnerCounts(
 
   return Object.fromEntries(
     rows.map((row) => [row.benefitActionId, row._count._all]),
+  );
+}
+
+/**
+ * The request statuses that count as "open" — the ladder before CLOSED. One
+ * definition so the resolver below, requestBenefitRedemptionAction's duplicate
+ * check and the hand-written partial unique index
+ * (BenefitRedemptionRequest_open_per_org_benefit_key) cannot drift apart: the
+ * index enforces uniqueness over exactly this set.
+ */
+export const OPEN_BENEFIT_REQUEST_STATUSES = [
+  BenefitRequestStatus.REQUESTED,
+  BenefitRequestStatus.ACKNOWLEDGED,
+  BenefitRequestStatus.IN_PROGRESS,
+] as const;
+
+export type OrganisationBenefitRequest = {
+  id: number;
+  benefitCode: string;
+  status: BenefitRequestStatus;
+  note: string;
+  preferredTimeframe: string | null;
+  contactPreference: string | null;
+  requestedAt: Date;
+  /** Full name of the contact who raised it; null once their account is deleted. */
+  requestedByName: string | null;
+};
+
+/**
+ * One partner's open benefit requests, keyed by benefit code — one query for
+ * the whole map, not one per benefit. A missing key means nothing open for
+ * that benefit, the common case; the partial unique index guarantees at most
+ * one open request per benefit, so the code key cannot collide. CLOSED
+ * requests are history and deliberately absent.
+ *
+ * A plain object rather than a Map so the result can cross the server →
+ * client component boundary as props unchanged.
+ */
+export async function getOpenBenefitRequestsForOrganisation(
+  client: BenefitCatalogueClient,
+  organisationId: number,
+): Promise<Record<string, OrganisationBenefitRequest>> {
+  const rows = await client.benefitRedemptionRequest.findMany({
+    where: {
+      organisationId,
+      status: { in: [...OPEN_BENEFIT_REQUEST_STATUSES] },
+    },
+    select: {
+      id: true,
+      status: true,
+      note: true,
+      preferredTimeframe: true,
+      contactPreference: true,
+      requestedAt: true,
+      benefit: { select: { code: true } },
+      requestedBy: { select: { firstName: true, lastName: true } },
+    },
+  });
+
+  return Object.fromEntries(
+    rows.map((row) => [
+      row.benefit.code,
+      {
+        id: row.id,
+        benefitCode: row.benefit.code,
+        status: row.status,
+        note: row.note,
+        preferredTimeframe: row.preferredTimeframe,
+        contactPreference: row.contactPreference,
+        requestedAt: row.requestedAt,
+        requestedByName: row.requestedBy
+          ? `${row.requestedBy.firstName} ${row.requestedBy.lastName}`
+          : null,
+      },
+    ]),
   );
 }
 

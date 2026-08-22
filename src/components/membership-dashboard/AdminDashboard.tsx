@@ -13,6 +13,7 @@ import type {
   BenefitActionProgressMap,
   CatalogueBenefit,
   EditorBenefit,
+  OrganisationBenefitRequest,
 } from "@/lib/benefits";
 
 type AdminDashboardProps = AdminDashboardSummary & {
@@ -34,6 +35,7 @@ type AdminDashboardProps = AdminDashboardSummary & {
   benefitAuditTrail: AdminBenefitAuditEntry[];
   partnerNotes: Record<string, string>;
   partnerProgress: BenefitActionProgressMap;
+  partnerOpenRequests: Record<string, OrganisationBenefitRequest>;
   stepProgressCounts: Record<number, number>;
 
   initialTab?: string | null;
@@ -65,6 +67,7 @@ export default function AdminDashboard({
   benefitAuditTrail,
   partnerNotes,
   partnerProgress,
+  partnerOpenRequests,
   stepProgressCounts,
   initialTab = null,
   handbook,
@@ -100,6 +103,7 @@ export default function AdminDashboard({
           benefitAuditTrail={benefitAuditTrail}
           partnerNotes={partnerNotes}
           partnerProgress={partnerProgress}
+          partnerOpenRequests={partnerOpenRequests}
           stepProgressCounts={stepProgressCounts}
           initialTab={initialTab}
           handbook={handbook}
