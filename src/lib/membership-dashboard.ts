@@ -4,6 +4,10 @@ import {
   getMembershipForOrganisation,
   getRedeemedBenefitCodesForOrganisation,
 } from "@/lib/membership";
+import {
+  getOpenBenefitRequestsForOrganisation,
+  type OrganisationBenefitRequest,
+} from "@/lib/benefits";
 
 export type AdminTierSummary = {
   id: number;
@@ -37,6 +41,9 @@ export type MemberDashboardData = {
 
   // Dashboard-specific data
   redeemedBenefitCodes: string[];
+  // Open benefit requests, keyed by benefit code — the organisation's, like
+  // redemption, so a colleague's request shows on every contact's dashboard.
+  openBenefitRequests: Record<string, OrganisationBenefitRequest>;
 };
 
 export async function getAdminDashboardSummary(): Promise<AdminDashboardSummary> {
@@ -108,12 +115,14 @@ export async function getMemberDashboardData(
 
   // Tier and redemption both belong to the organisation, so every contact at
   // one partner sees the same dashboard.
-  const [membership, redeemedBenefitCodes] = user.organisationId
-    ? await Promise.all([
-        getMembershipForOrganisation(prisma, user.organisationId),
-        getRedeemedBenefitCodesForOrganisation(prisma, user.organisationId),
-      ])
-    : [null, [] as string[]];
+  const [membership, redeemedBenefitCodes, openBenefitRequests] =
+    user.organisationId
+      ? await Promise.all([
+          getMembershipForOrganisation(prisma, user.organisationId),
+          getRedeemedBenefitCodesForOrganisation(prisma, user.organisationId),
+          getOpenBenefitRequestsForOrganisation(prisma, user.organisationId),
+        ])
+      : [null, [] as string[], {} as Record<string, OrganisationBenefitRequest>];
 
   return {
     firstName: user.firstName,
@@ -125,5 +134,6 @@ export async function getMemberDashboardData(
     membershipExpiry: membership?.expiry ?? null,
     membershipManagerName: membership?.clientExperienceManager?.name ?? null,
     redeemedBenefitCodes,
+    openBenefitRequests,
   };
 }
