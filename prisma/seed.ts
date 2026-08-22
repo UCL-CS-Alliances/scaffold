@@ -1,5 +1,5 @@
 // prisma/seed.ts
-import { PrismaClient, OrganisationType } from '@prisma/client';
+import { PrismaClient, OrganisationType, BenefitRequestStatus } from '@prisma/client';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
@@ -556,8 +556,81 @@ async function main() {
   await seedAppAccessRules(apps, tierIdByYaml);
   await seedDemoUsers(apps, roleIdByKey);
   await seedClientExperienceManagers(rawMembers);
+  await seedBenefitRequests();
 
   console.log('\nSeeding complete ✅');
+}
+
+// Runs after the member loop and seedBenefits, so the organisation, its
+// contacts and the benefit all exist. Raised by Nia — the *second* Microsoft
+// contact — deliberately: the request is the organisation's, so Arun, the
+// primary contact, sees a colleague's request on his own dashboard.
+async function seedBenefitRequests() {
+  console.log('\nSeeding benefit redemption requests…');
+
+  const organisation = await prisma.organisation.findUnique({
+    where: { slug: 'microsoft' },
+    select: { id: true },
+  });
+  const benefit = await prisma.benefit.findUnique({
+    where: { code: 'B04' },
+    select: { id: true },
+  });
+  const requester = await prisma.user.findUnique({
+    where: { email: 'research@microsoft.example.com' },
+    select: { id: true },
+  });
+
+  if (!organisation || !benefit || !requester) {
+    console.warn('  ! Skipping benefit request seed: Microsoft, B04 or Nia not found');
+    return;
+  }
+
+  // create() is not repeat-safe: the partial unique index allows one *open*
+  // request per (organisation, benefit) and CI runs the seed twice. Prisma
+  // upsert cannot target an index it cannot express, so find the open request
+  // first and converge it in place — fixture wins, like the rest of the seed.
+  const existing = await prisma.benefitRedemptionRequest.findFirst({
+    where: {
+      organisationId: organisation.id,
+      benefitId: benefit.id,
+      status: {
+        in: [
+          BenefitRequestStatus.REQUESTED,
+          BenefitRequestStatus.ACKNOWLEDGED,
+          BenefitRequestStatus.IN_PROGRESS,
+        ],
+      },
+    },
+    select: { id: true },
+  });
+
+  const fields = {
+    status: BenefitRequestStatus.REQUESTED,
+    note: 'We would like to promote two graduate software engineering roles to final-year and MSc students this academic year.',
+    preferredTimeframe: 'Early in the autumn term',
+    contactPreference: null,
+    requestedById: requester.id,
+    acknowledgedAt: null,
+    acknowledgedById: null,
+  };
+
+  if (existing) {
+    await prisma.benefitRedemptionRequest.update({
+      where: { id: existing.id },
+      data: fields,
+    });
+    console.log(`  - microsoft → B04: open request converged (id=${existing.id})`);
+  } else {
+    const created = await prisma.benefitRedemptionRequest.create({
+      data: {
+        organisationId: organisation.id,
+        benefitId: benefit.id,
+        ...fields,
+      },
+    });
+    console.log(`  - microsoft → B04: open request created (id=${created.id})`);
+  }
 }
 
 // Runs after every user exists — the admins a manager_email can name are

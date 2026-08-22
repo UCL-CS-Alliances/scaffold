@@ -53,6 +53,11 @@ model User {
   // Progress rows this admin ticked; SET NULL on deletion, like auditLogs.
   benefitActionProgress BenefitActionProgress[]
 
+  // Benefit requests this contact raised or acknowledged; SET NULL likewise —
+  // a request is the organisation's and outlives any one contact.
+  benefitRequestsRaised       BenefitRedemptionRequest[] @relation("BenefitRequestRequestedBy")
+  benefitRequestsAcknowledged BenefitRedemptionRequest[] @relation("BenefitRequestAcknowledgedBy")
+
   @@index([organisationId])
 }
 
@@ -75,6 +80,9 @@ model Organisation {
 
   // Per-step benefit progress, organisation-scoped like everything above.
   benefitActionProgress BenefitActionProgress[]
+
+  // Member-raised redemption requests, organisation-scoped like redemption.
+  benefitRequests BenefitRedemptionRequest[]
 }
 
 enum OrganisationType {
@@ -240,6 +248,10 @@ model Benefit {
   actions BenefitAction[]
   notes   BenefitPartnerNote[]
 
+  // Restrict, not Cascade: an open request must not silently vanish with a
+  // benefit — retire the benefit instead, which is the rule anyway.
+  benefitRequests BenefitRedemptionRequest[]
+
   @@index([tierMinId])
 }
 
@@ -306,6 +318,53 @@ model BenefitPartnerNote {
   // One editable note per partner per benefit, overwritten in place.
   @@unique([benefitId, organisationId])
   @@index([organisationId])
+}
+
+enum BenefitRequestStatus {
+  REQUESTED
+  ACKNOWLEDGED
+  IN_PROGRESS
+  CLOSED
+}
+
+model BenefitRedemptionRequest {
+  id Int @id @default(autoincrement())
+
+  // The request belongs to the partner organisation, like membership,
+  // redemption, notes and progress: a benefit is consumed once per partner,
+  // so a colleague's open request is the same request.
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  organisationId Int
+
+  // A real FK, not a bare code: benefits are retired, never deleted, so this
+  // still resolves for a benefit withdrawn after the request was raised.
+  benefit   Benefit @relation(fields: [benefitId], references: [id], onDelete: Restrict)
+  benefitId Int
+
+  status BenefitRequestStatus @default(REQUESTED)
+
+  // What the member submitted. The note is required by the action; the other
+  // two are optional prompts to save a round-trip with the manager.
+  note               String
+  preferredTimeframe String?
+  contactPreference  String?
+
+  requestedAt   DateTime @default(now())
+  // Mirrors AuditLog.actorId: the request outlives the contact who raised it.
+  requestedBy   User?    @relation("BenefitRequestRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  requestedById String?
+
+  // Written by sub-issue F; nothing in this PR sets them.
+  acknowledgedAt   DateTime?
+  acknowledgedBy   User?     @relation("BenefitRequestAcknowledgedBy", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+  acknowledgedById String?
+
+  // "Open requests for this partner" (the common read) and "open requests
+  // oldest first" (F's queue, and the lazy 3-month timeout if it ever lands).
+  @@index([organisationId, status])
+  @@index([status, requestedAt])
+  @@index([benefitId])
+  @@index([requestedById])
 }
 
 // AUTH MODELS (NextAuth-style)
