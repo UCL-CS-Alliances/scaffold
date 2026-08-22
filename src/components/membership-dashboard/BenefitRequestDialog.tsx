@@ -98,7 +98,7 @@ export default function BenefitRequestDialog(props: {
         <p className="small" style={{ marginTop: 0 }}>
           This registers your interest with your client experience manager, who
           will get in touch to arrange it. It does not mark the benefit
-          redeemed, and the request is recorded for your whole organisation —
+          redeemed, and the request is recorded for your whole organisation -
           your colleagues will see it too.
         </p>
 
@@ -154,7 +154,7 @@ export default function BenefitRequestDialog(props: {
               maxLength={200}
             />
             <p className="small" style={{ margin: "0.25rem 0 0" }}>
-              If it is not you.
+              This will default to you if left blank.
             </p>
           </div>
 
