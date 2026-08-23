@@ -11,6 +11,7 @@ import {
   getAdminBenefitAuditTrail,
   getAdminBenefitRedemptionStats,
   getAdminMemberList,
+  getAdminOpenBenefitRequests,
   getAdminSelectedMember,
   getMembershipTierOptions,
 } from "@/lib/membership-dashboard-admin";
@@ -108,6 +109,7 @@ export default async function MembershipDashboardPage(props: Props) {
       totalUsers,
       editorBenefits,
       tierOptions,
+      openRequestQueue,
     ] = await Promise.all([
       getAdminDashboardSummary(),
       getAdminMemberList(),
@@ -121,6 +123,8 @@ export default async function MembershipDashboardPage(props: Props) {
       // step rows surfaced. Member-facing consumers keep the list above.
       getBenefitCatalogueForEditor(prisma),
       getMembershipTierOptions(),
+      // The cross-partner request queue (benefits tab, ?view=requests).
+      getAdminOpenBenefitRequests(),
     ]);
 
     // Feeds the editor's step-deletion warning: how many partners' progress
@@ -192,6 +196,7 @@ export default async function MembershipDashboardPage(props: Props) {
         editorBenefits={editorBenefits}
         tierOptions={tierOptions}
         benefitStats={benefitStats}
+        openRequestQueue={openRequestQueue}
         benefitAuditTrail={benefitAuditTrail}
         partnerNotes={partnerNotes}
         partnerProgress={partnerProgress}

@@ -1,5 +1,7 @@
 // src/lib/membership-dashboard-admin.ts
+import type { BenefitRequestStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { OPEN_BENEFIT_REQUEST_STATUSES } from "@/lib/benefits";
 import type { CatalogueBenefit } from "@/lib/benefits";
 import { hasBenefitAccess } from "@/lib/benefit-access";
 import {
@@ -288,6 +290,11 @@ export type AdminBenefitRedemptionStat = {
   eligible: number;
   redeemed: number;
   percent: number | null; // null when eligible=0
+  // Eligible organisations with an open request for the benefit. Like
+  // eligible/redeemed, this deliberately counts only organisations whose
+  // CURRENT tier includes the benefit — which is also why an out-of-tier
+  // redemption counts nowhere here.
+  requested: number;
 };
 
 // The catalogue is passed in rather than resolved here, as the eligibility
@@ -328,6 +335,7 @@ export async function getAdminBenefitRedemptionStats(
       eligible: 0,
       redeemed: 0,
       percent: null,
+      requested: 0,
     }));
   }
 
@@ -335,6 +343,21 @@ export async function getAdminBenefitRedemptionStats(
     where: { organisationId: { in: [...rankByOrganisation.keys()] } },
     select: { organisationId: true, redeemedBenefitCodes: true },
   });
+
+  // One query for every open request; the partial unique index already
+  // guarantees at most one open row per (organisation, benefit), so this
+  // select IS the grouped set — no aggregation needed on top.
+  const openRequests = await prisma.benefitRedemptionRequest.findMany({
+    where: { status: { in: [...OPEN_BENEFIT_REQUEST_STATUSES] } },
+    select: { organisationId: true, benefit: { select: { code: true } } },
+  });
+
+  const openRequestOrgsByCode = new Map<string, number[]>();
+  for (const r of openRequests) {
+    const list = openRequestOrgsByCode.get(r.benefit.code) ?? [];
+    list.push(r.organisationId);
+    openRequestOrgsByCode.set(r.benefit.code, list);
+  }
 
   const redeemedByOrganisation = new Map<number, Set<string>>(
     projections.map((p) => [p.organisationId, new Set(p.redeemedBenefitCodes)]),
@@ -355,6 +378,96 @@ export async function getAdminBenefitRedemptionStats(
     const redeemed = eligibleOrganisations.filter((o) => o.redeemed.has(b.id)).length;
     const percent = eligible === 0 ? null : Math.round((redeemed / eligible) * 100);
 
-    return { benefitId: b.id, eligible, redeemed, percent };
+    const requested = (openRequestOrgsByCode.get(b.id) ?? []).filter(
+      (organisationId) => {
+        const rank = rankByOrganisation.get(organisationId);
+        return rank != null && hasBenefitAccess(rank, b.tierMinRank);
+      },
+    ).length;
+
+    return { benefitId: b.id, eligible, redeemed, percent, requested };
+  });
+}
+
+export type AdminOpenBenefitRequest = {
+  requestId: number;
+  organisationId: number;
+  organisationName: string;
+  benefitCode: string;
+  status: BenefitRequestStatus;
+  requestedAt: Date;
+  requestedByName: string | null;
+  // The active membership's tier; null when the membership has lapsed since
+  // the request was raised.
+  tierLabel: string | null;
+  // Whose client this is — the assigned client experience manager. Null
+  // renders as the Strategic Alliances Team, matching everywhere else.
+  managerName: string | null;
+  // The contact whose ?userId= opens this partner's benefits panel: the
+  // primary contact where there is one, falling back to any contact. Null
+  // (organisation with no contacts left) renders without a link.
+  linkUserId: string | null;
+};
+
+/**
+ * The cross-partner queue: every open request across all organisations,
+ * newest first — the read the [status, requestedAt] index landed for. One
+ * query with the relations included; per decision 6 any admin may act, but
+ * the manager column shows who is normally expected to.
+ */
+export async function getAdminOpenBenefitRequests(): Promise<
+  AdminOpenBenefitRequest[]
+> {
+  const rows = await prisma.benefitRedemptionRequest.findMany({
+    where: { status: { in: [...OPEN_BENEFIT_REQUEST_STATUSES] } },
+    orderBy: { requestedAt: "desc" },
+    select: {
+      id: true,
+      status: true,
+      requestedAt: true,
+      organisationId: true,
+      benefit: { select: { code: true } },
+      requestedBy: { select: { firstName: true, lastName: true } },
+      organisation: {
+        select: {
+          name: true,
+          // Primary contact first, so [0] is the link target.
+          users: {
+            select: { id: true },
+            orderBy: [{ isPrimaryContact: "desc" }, { lastName: "asc" }],
+            take: 1,
+          },
+          membership: {
+            select: {
+              isActive: true,
+              membershipTier: { select: { label: true } },
+              clientExperienceManager: {
+                select: { firstName: true, lastName: true },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  return rows.map((r) => {
+    const membership = r.organisation.membership;
+    const manager = membership?.clientExperienceManager;
+
+    return {
+      requestId: r.id,
+      organisationId: r.organisationId,
+      organisationName: r.organisation.name,
+      benefitCode: r.benefit.code,
+      status: r.status,
+      requestedAt: r.requestedAt,
+      requestedByName: r.requestedBy
+        ? `${r.requestedBy.firstName} ${r.requestedBy.lastName}`
+        : null,
+      tierLabel: membership?.isActive ? membership.membershipTier.label : null,
+      managerName: manager ? `${manager.firstName} ${manager.lastName}` : null,
+      linkUserId: r.organisation.users[0]?.id ?? null,
+    };
   });
 }

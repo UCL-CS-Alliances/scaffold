@@ -14,6 +14,7 @@ import type {
   AdminBenefitAuditEntry,
   AdminBenefitRedemptionStat,
   AdminMemberListItem,
+  AdminOpenBenefitRequest,
   AdminSelectedMember,
   MembershipTierOption,
 } from "@/lib/membership-dashboard-admin";
@@ -45,12 +46,13 @@ function asTabKey(v: string | null | undefined): TabKey | null {
 }
 
 // The benefits tab's no-selection view: redemption stats by default, with the
-// catalogue editor as a deliberate ?view= destination (same guard style as
-// asTabKey; talent-discovery's ?view= is the precedent).
-type BenefitsViewKey = "stats" | "editor";
+// catalogue editor and the cross-partner request queue as deliberate ?view=
+// destinations (same guard style as asTabKey; talent-discovery's ?view= is
+// the precedent).
+type BenefitsViewKey = "stats" | "editor" | "requests";
 
 function asBenefitsViewKey(v: string | null | undefined): BenefitsViewKey | null {
-  if (v === "stats" || v === "editor") return v;
+  if (v === "stats" || v === "editor" || v === "requests") return v;
   return null;
 }
 
@@ -247,6 +249,7 @@ export default function AdminDashboardClient(props: {
   editorBenefits: EditorBenefit[];
   tierOptions: MembershipTierOption[];
   benefitStats: AdminBenefitRedemptionStat[];
+  openRequestQueue: AdminOpenBenefitRequest[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
   partnerNotes: Record<string, string>;
   partnerProgress: BenefitActionProgressMap;
@@ -263,6 +266,7 @@ export default function AdminDashboardClient(props: {
     editorBenefits,
     tierOptions,
     benefitStats,
+    openRequestQueue,
     benefitAuditTrail,
     partnerNotes,
     partnerProgress,
@@ -656,7 +660,9 @@ export default function AdminDashboardClient(props: {
                 <h3 style={{ marginTop: 0 }}>
                   {benefitsView === "editor"
                     ? "Benefit catalogue editor"
-                    : "Benefits overview"}
+                    : benefitsView === "requests"
+                      ? "Open requests across all partners"
+                      : "Benefits overview"}
                 </h3>
 
                 <div className="cluster" style={{ marginBottom: ".75rem" }}>
@@ -667,6 +673,14 @@ export default function AdminDashboardClient(props: {
                     onClick={() => changeBenefitsView("stats")}
                   >
                     Redemption stats
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab ${benefitsView === "requests" ? "is-active" : ""}`}
+                    aria-pressed={benefitsView === "requests"}
+                    onClick={() => changeBenefitsView("requests")}
+                  >
+                    Open requests
                   </button>
                   <button
                     type="button"
@@ -684,6 +698,64 @@ export default function AdminDashboardClient(props: {
                     tierOptions={tierOptions}
                     stepProgressCounts={stepProgressCounts}
                   />
+                ) : benefitsView === "requests" ? (
+                  openRequestQueue.length === 0 ? (
+                    <p className="small">
+                      No open requests across any partner.
+                    </p>
+                  ) : (
+                    <div className="table-wrap">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Partner</th>
+                            <th>Benefit</th>
+                            <th>Status</th>
+                            <th>Requested</th>
+                            <th>Tier</th>
+                            <th>Client of</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {openRequestQueue.map((item) => (
+                            <tr key={item.requestId}>
+                              <td>
+                                {/* Any admin may act (decision 6); the link
+                                    lands on the partner's benefits panel so
+                                    they can. No contacts left → no link,
+                                    rather than a dead one. */}
+                                {item.linkUserId ? (
+                                  <Link
+                                    href={`/membership-dashboard?tab=benefits&userId=${encodeURIComponent(item.linkUserId)}`}
+                                  >
+                                    <strong>{item.organisationName}</strong>
+                                  </Link>
+                                ) : (
+                                  <strong>{item.organisationName}</strong>
+                                )}
+                              </td>
+                              <td>{benefitLabel(benefits, item.benefitCode)}</td>
+                              <td>
+                                <span className="pill">
+                                  {requestStatusLabel(item.status)}
+                                </span>
+                              </td>
+                              <td>
+                                {formatDateTimeGB(item.requestedAt)}
+                                <div className="small">
+                                  by {item.requestedByName ?? "Unknown contact"}
+                                </div>
+                              </td>
+                              <td>{item.tierLabel ?? "No active membership"}</td>
+                              <td>
+                                {item.managerName ?? "Strategic Alliances Team"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
                 ) : (
                 <div className="table-wrap">
                   <table className="table">
@@ -693,6 +765,7 @@ export default function AdminDashboardClient(props: {
                         <th>Eligible members</th>
                         <th>Redeemed</th>
                         <th>% Redeemed</th>
+                        <th>Requested</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -714,6 +787,7 @@ export default function AdminDashboardClient(props: {
                             <td>{stat?.eligible ?? "—"}</td>
                             <td>{stat?.redeemed ?? "—"}</td>
                             <td>{pct}</td>
+                            <td>{stat?.requested ?? "—"}</td>
                           </tr>
                         );
                       })}
