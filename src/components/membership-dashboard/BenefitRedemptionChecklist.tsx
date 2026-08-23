@@ -62,8 +62,11 @@ function SteppedBenefitRow(props: {
   progress: BenefitActionProgressMap;
   redeemed: boolean;
   openRequest: OrganisationBenefitRequest | null;
+  /** Redeemed but outside the partner's current tier — marked, not hidden. */
+  outOfTier: boolean;
 }) {
-  const { organisationId, benefit, progress, redeemed, openRequest } = props;
+  const { organisationId, benefit, progress, redeemed, openRequest, outOfTier } =
+    props;
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -134,6 +137,10 @@ function SteppedBenefitRow(props: {
           <span className="small">
             {draft.size}/{steps.length} steps
           </span>
+
+          {outOfTier && (
+            <span className="pill">Not in current tier</span>
+          )}
 
           {/* Read-only request context: what the partner asked for, visible
               where the admin actually ticks. No controls here — the
@@ -225,8 +232,10 @@ function SteplessBenefitRow(props: {
   benefit: CatalogueBenefit;
   redeemed: boolean;
   openRequest: OrganisationBenefitRequest | null;
+  /** Redeemed but outside the partner's current tier — marked, not hidden. */
+  outOfTier: boolean;
 }) {
-  const { organisationId, benefit, redeemed, openRequest } = props;
+  const { organisationId, benefit, redeemed, openRequest, outOfTier } = props;
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -265,6 +274,8 @@ function SteplessBenefitRow(props: {
           <strong>{benefit.label}</strong>
         </label>
 
+        {outOfTier && <span className="pill">Not in current tier</span>}
+
         {openRequest && (
           <span className="pill">{requestStatusLabel(openRequest.status)}</span>
         )}
@@ -299,10 +310,11 @@ function SteplessBenefitRow(props: {
 }
 
 /**
- * The combined redemption checklist and step tracker: each in-tier benefit
- * with steps is a dropdown whose summary checkbox means "redeemed", i.e.
- * "every step complete" — one state, no disagreement possible. Saves are per
- * benefit, so a save cannot overwrite a colleague's edit to a different one.
+ * The combined redemption checklist and step tracker: each in-tier (or
+ * redeemed — redemption beats tier) benefit with steps is a dropdown whose
+ * summary checkbox means "redeemed", i.e. "every step complete" — one state,
+ * no disagreement possible. Saves are per benefit, so a save cannot
+ * overwrite a colleague's edit to a different one.
  */
 export default function BenefitRedemptionChecklist(props: {
   organisationId: number;
@@ -341,8 +353,14 @@ export default function BenefitRedemptionChecklist(props: {
       <ul className="list-plain" style={{ marginTop: ".75rem" }}>
         {benefits.map((b) => {
           const included = hasBenefitAccess(memberRank, b.tierMinRank);
+          const isRedeemed = redeemedSet.has(b.id);
 
-          if (!included) {
+          // Redemption beats tier (2026-08-22): a redeemed benefit outside
+          // the current tier renders as a normal, correctable row with an
+          // out-of-tier marker — an inert locked row would hide the
+          // redemption from the one person who can fix it. Locked and
+          // unredeemed stays the plain locked row it always was.
+          if (!included && !isRedeemed) {
             return (
               <li
                 key={b.id}
@@ -365,8 +383,9 @@ export default function BenefitRedemptionChecklist(props: {
                 key={`${b.id}:${redeemedSet.has(b.id) ? 1 : 0}`}
                 organisationId={organisationId}
                 benefit={b}
-                redeemed={redeemedSet.has(b.id)}
+                redeemed={isRedeemed}
                 openRequest={openRequests[b.id] ?? null}
+                outOfTier={!included}
               />
             );
           }
@@ -382,8 +401,9 @@ export default function BenefitRedemptionChecklist(props: {
               organisationId={organisationId}
               benefit={b}
               progress={progress}
-              redeemed={redeemedSet.has(b.id)}
+              redeemed={isRedeemed}
               openRequest={openRequests[b.id] ?? null}
+              outOfTier={!included}
             />
           );
         })}

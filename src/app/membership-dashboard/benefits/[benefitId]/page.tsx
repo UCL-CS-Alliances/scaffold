@@ -32,9 +32,11 @@ type BenefitStatus =
   | "HAS_ACCESS"
   | "NO_ACCESS";
 
-// Precedence matters, and the order is deliberate: tier access first, then
-// redeemed — a redeemed benefit stays "Redeemed" whatever else is true — then
-// any open request, then superseded. The open request sits AHEAD of
+// Precedence matters, and the order is deliberate: redeemed FIRST — a
+// delivered benefit reads ✅ Redeemed even when the organisation's current
+// tier no longer includes it (2026-08-22: the old access-first order made
+// such a benefit lie as 🔒 "Not included in your tier") — then tier access,
+// then any open request, then superseded. The open request sits AHEAD of
 // superseded because it is a live fact about this benefit (someone at the
 // organisation has actually asked for it), whereas supersede is advice about
 // a better one — advice must not hide a request already in flight.
@@ -44,8 +46,8 @@ function determineStatus(
   openRequest: OrganisationBenefitRequest | null,
   isSuperseded: boolean,
 ): BenefitStatus {
-  if (!hasAccess) return "NO_ACCESS";
   if (isRedeemed) return "REDEEMED";
+  if (!hasAccess) return "NO_ACCESS";
   if (openRequest) {
     switch (openRequest.status) {
       case "REQUESTED":
@@ -189,9 +191,12 @@ export default async function BenefitPage({ params }: PageProps) {
         {status === "REDEEMED" && (
           <>
             <p>
-              This benefit has already been redeemed under your current
-              membership. If you believe this is incorrect, please contact the
-              Strategic Alliances team.
+              This benefit has already been redeemed
+              {hasAccess ? " under your current membership" : ""}.
+              {!hasAccess &&
+                " It was redeemed under a previous arrangement and is not included in your current membership tier."}{" "}
+              If you believe this is incorrect, please contact the Strategic
+              Alliances team.
             </p>
 
             <p style={{ marginTop: "1.25rem" }}>
