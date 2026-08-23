@@ -3,12 +3,30 @@
 
 import { useState, useTransition, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
-import type { BenefitActionProgressMap, CatalogueBenefit } from "@/lib/benefits";
+import type {
+  BenefitActionProgressMap,
+  CatalogueBenefit,
+  OrganisationBenefitRequest,
+} from "@/lib/benefits";
 import { hasBenefitAccess } from "@/lib/benefit-access";
 import {
   saveBenefitActionProgressAction,
   saveBenefitRedemptionAction,
 } from "@/lib/membership-dashboard-actions";
+
+// Only the open statuses ever reach these maps — the resolver excludes
+// CLOSED. Shared with the open-requests panel in AdminDashboardClient so the
+// two surfaces cannot label a status differently.
+export function requestStatusLabel(status: OrganisationBenefitRequest["status"]) {
+  switch (status) {
+    case "ACKNOWLEDGED":
+      return "Acknowledged";
+    case "IN_PROGRESS":
+      return "Working on it";
+    default:
+      return "Requested";
+  }
+}
 
 // Server actions throw on failure; the message is shown as-is in development
 // but masked by Next.js in production, so keep a usable fallback.
@@ -43,8 +61,9 @@ function SteppedBenefitRow(props: {
   benefit: CatalogueBenefit;
   progress: BenefitActionProgressMap;
   redeemed: boolean;
+  openRequest: OrganisationBenefitRequest | null;
 }) {
-  const { organisationId, benefit, progress, redeemed } = props;
+  const { organisationId, benefit, progress, redeemed, openRequest } = props;
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -116,6 +135,13 @@ function SteppedBenefitRow(props: {
             {draft.size}/{steps.length} steps
           </span>
 
+          {/* Read-only request context: what the partner asked for, visible
+              where the admin actually ticks. No controls here — the
+              transitions live on the request rows in the panel above. */}
+          {openRequest && (
+            <span className="pill">{requestStatusLabel(openRequest.status)}</span>
+          )}
+
           {dirty && (
             <button
               type="button"
@@ -134,6 +160,12 @@ function SteppedBenefitRow(props: {
             <span className="small">
               redemption flag out of sync with steps — saving this benefit will
               sync it
+            </span>
+          )}
+          {openRequest && (
+            <span className="small" style={{ flexBasis: "100%" }}>
+              Requested by {openRequest.requestedByName ?? "a former contact"}{" "}
+              on {formatDateGB(openRequest.requestedAt) ?? "an unknown date"}
             </span>
           )}
         </summary>
@@ -192,8 +224,9 @@ function SteplessBenefitRow(props: {
   organisationId: number;
   benefit: CatalogueBenefit;
   redeemed: boolean;
+  openRequest: OrganisationBenefitRequest | null;
 }) {
-  const { organisationId, benefit, redeemed } = props;
+  const { organisationId, benefit, redeemed, openRequest } = props;
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -232,6 +265,10 @@ function SteplessBenefitRow(props: {
           <strong>{benefit.label}</strong>
         </label>
 
+        {openRequest && (
+          <span className="pill">{requestStatusLabel(openRequest.status)}</span>
+        )}
+
         {dirty && (
           <button
             type="button"
@@ -244,6 +281,13 @@ function SteplessBenefitRow(props: {
         )}
         {isPending && <span className="small">Saving…</span>}
       </div>
+
+      {openRequest && (
+        <div className="small" style={{ marginTop: ".25rem" }}>
+          Requested by {openRequest.requestedByName ?? "a former contact"} on{" "}
+          {formatDateGB(openRequest.requestedAt) ?? "an unknown date"}
+        </div>
+      )}
 
       {error && (
         <p className="small" role="alert" style={{ marginTop: ".25rem" }}>
@@ -267,6 +311,7 @@ export default function BenefitRedemptionChecklist(props: {
   memberRank: number | null;
   redeemedCodes: string[];
   progress: BenefitActionProgressMap;
+  openRequests: Record<string, OrganisationBenefitRequest>;
 }) {
   const {
     organisationId,
@@ -275,6 +320,7 @@ export default function BenefitRedemptionChecklist(props: {
     memberRank,
     redeemedCodes,
     progress,
+    openRequests,
   } = props;
 
   const redeemedSet = new Set(redeemedCodes);
@@ -320,6 +366,7 @@ export default function BenefitRedemptionChecklist(props: {
                 organisationId={organisationId}
                 benefit={b}
                 redeemed={redeemedSet.has(b.id)}
+                openRequest={openRequests[b.id] ?? null}
               />
             );
           }
@@ -336,6 +383,7 @@ export default function BenefitRedemptionChecklist(props: {
               benefit={b}
               progress={progress}
               redeemed={redeemedSet.has(b.id)}
+              openRequest={openRequests[b.id] ?? null}
             />
           );
         })}

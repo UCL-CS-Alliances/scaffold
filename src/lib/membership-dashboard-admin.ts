@@ -190,10 +190,17 @@ export async function getAdminSelectedMember(userId: string): Promise<AdminSelec
 
 export type AdminBenefitAuditEntry = {
   id: string;
-  action: string; // "UPDATE" | "CREATE"
+  // REDEMPTION rows carry the added/removed code arrays; REQUEST rows carry
+  // the lifecycle fields below. One list, both entity types, so the panel
+  // shows redemptions and request transitions as a single chronological
+  // trail.
+  kind: "REDEMPTION" | "REQUEST";
+  action: string; // "UPDATE" | "CREATE" | "BENEFIT_REQUEST_*"
   timestamp: Date;
   // Actor from the live relation when it exists; actorId is ON DELETE SET
-  // NULL, so deleted admins fall back to the email denormalised into data.
+  // NULL, so deleted accounts fall back to the email denormalised into data.
+  // A REQUEST entry's actor may be a member, not an admin — raising is the
+  // member's act.
   actorName: string | null;
   actorEmail: string | null;
   actorDeleted: boolean;
@@ -201,10 +208,20 @@ export type AdminBenefitAuditEntry = {
   next: string[];
   added: string[];
   removed: string[];
+  // REQUEST entries only (null on redemption rows; previous/nextStatus are
+  // also null on a RAISED row, which has no transition).
+  benefitCode: string | null;
+  previousStatus: string | null;
+  nextStatus: string | null;
+  reason: string | null;
 };
 
 function asStringArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+function asStringOrNull(v: unknown): string | null {
+  return typeof v === "string" ? v : null;
 }
 
 export async function getAdminBenefitAuditTrail(
@@ -212,7 +229,9 @@ export async function getAdminBenefitAuditTrail(
 ): Promise<AdminBenefitAuditEntry[]> {
   const rows = await prisma.auditLog.findMany({
     where: {
-      entityType: "OrganisationBenefitRedemption",
+      entityType: {
+        in: ["OrganisationBenefitRedemption", "OrganisationBenefitRequest"],
+      },
       entityId: String(organisationId),
     },
     orderBy: { timestamp: "desc" },
@@ -222,11 +241,14 @@ export async function getAdminBenefitAuditTrail(
 
   return rows.map((r) => {
     const data = (r.data ?? {}) as Record<string, unknown>;
-    const denormalisedEmail =
-      typeof data.actorEmail === "string" ? data.actorEmail : null;
+    const denormalisedEmail = asStringOrNull(data.actorEmail);
 
     return {
       id: r.id,
+      kind:
+        r.entityType === "OrganisationBenefitRequest"
+          ? ("REQUEST" as const)
+          : ("REDEMPTION" as const),
       action: r.action,
       timestamp: r.timestamp,
       actorName: r.actor ? `${r.actor.firstName} ${r.actor.lastName}` : null,
@@ -236,6 +258,10 @@ export async function getAdminBenefitAuditTrail(
       next: asStringArray(data.next),
       added: asStringArray(data.added),
       removed: asStringArray(data.removed),
+      benefitCode: asStringOrNull(data.benefitCode),
+      previousStatus: asStringOrNull(data.previousStatus),
+      nextStatus: asStringOrNull(data.nextStatus),
+      reason: asStringOrNull(data.reason),
     };
   });
 }
