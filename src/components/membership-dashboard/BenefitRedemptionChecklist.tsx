@@ -286,8 +286,10 @@ export default function BenefitRedemptionChecklist(props: {
         <strong>{organisationName ?? "the organisation"}</strong> as a whole,
         not for an individual contact. Ticking a benefit&apos;s checkbox marks
         every process step complete and the benefit redeemed; unticking clears
-        the steps and the redemption. Partners see the step progress read-only
-        on each benefit&apos;s page.
+        the steps and the redemption. Unticking does not restore a request
+        that was closed when the benefit was delivered — the partner would
+        need to request it again. Partners see the step progress read-only on
+        each benefit&apos;s page.
       </p>
 
       <ul className="list-plain" style={{ marginTop: ".75rem" }}>

@@ -1,7 +1,7 @@
 // src/lib/membership-dashboard-actions.ts
 "use server";
 
-import { Prisma } from "@prisma/client";
+import { BenefitRequestStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { recordAuditLog } from "@/lib/audit-log";
@@ -133,12 +133,22 @@ export async function saveBenefitPartnerNoteAction(input: {
  * OrganisationBenefitRedemption audit row the old bulk save wrote, so the
  * admin-facing change history keeps working unchanged. Runs inside the
  * caller's transaction.
+ *
+ * Redemption also CLOSES any open request for the benefit (decision
+ * 2026-08-22): delivery is the natural end of the request's lifecycle, and
+ * leaving it open would keep the admin's open-requests panel contradicting
+ * the checklist above it — the same two-controls-disagree failure the
+ * redemption ⟺ step-completion equivalence exists to remove. Un-redeeming
+ * does NOT reopen anything: the request stays CLOSED and the member requests
+ * again, which the partial unique index (open statuses only) permits.
  */
 async function syncRedemptionCode(
   tx: Prisma.TransactionClient,
   input: {
     organisationId: number;
     organisationSlug: string;
+    /** Benefit DB id, for the request lookup. Callers already hold the row. */
+    benefitId: number;
     benefitCode: string;
     /** Whether the code should be present after this call. */
     redeemed: boolean;
@@ -191,6 +201,45 @@ async function syncRedemptionCode(
       removed: input.redeemed ? [] : [input.benefitCode],
     },
   });
+
+  // Close-on-redeem lives HERE, not in the two callers, so that both writers
+  // (the stepless toggle and the final step of a stepped benefit) get it and
+  // neither can drift: any path that marks the benefit redeemed closes the
+  // partner's open request in the same transaction. The partial unique index
+  // guarantees at most one open row per (organisation, benefit).
+  if (input.redeemed) {
+    const openRequest = await tx.benefitRedemptionRequest.findFirst({
+      where: {
+        organisationId: input.organisationId,
+        benefitId: input.benefitId,
+        status: { in: [...OPEN_BENEFIT_REQUEST_STATUSES] },
+      },
+      select: { id: true, status: true },
+    });
+
+    if (openRequest) {
+      await tx.benefitRedemptionRequest.update({
+        where: { id: openRequest.id },
+        data: { status: BenefitRequestStatus.CLOSED },
+      });
+
+      await recordAuditLog(tx, {
+        entityType: "OrganisationBenefitRequest",
+        entityId: String(input.organisationId),
+        action: "BENEFIT_REQUEST_CLOSED",
+        actorId: input.actorId,
+        data: {
+          organisationId: input.organisationId,
+          benefitCode: input.benefitCode,
+          requestId: openRequest.id,
+          actorEmail: input.actorEmail,
+          previousStatus: openRequest.status,
+          nextStatus: BenefitRequestStatus.CLOSED,
+          reason: "DELIVERED",
+        },
+      });
+    }
+  }
 }
 
 /**
@@ -303,6 +352,7 @@ export async function saveBenefitActionProgressAction(input: {
     await syncRedemptionCode(tx, {
       organisationId,
       organisationSlug: organisation.slug,
+      benefitId: benefit.id,
       benefitCode: benefit.code,
       redeemed: stepIds.size > 0 && submitted.length === stepIds.size,
       actorId,
@@ -334,7 +384,7 @@ export async function saveBenefitRedemptionAction(input: {
   await prisma.$transaction(async (tx) => {
     const benefit = await tx.benefit.findUnique({
       where: { code: input.benefitCode },
-      select: { code: true, actions: { select: { id: true }, take: 1 } },
+      select: { id: true, code: true, actions: { select: { id: true }, take: 1 } },
     });
     if (!benefit) throw new Error(`Unknown benefit code: ${input.benefitCode}`);
     if (benefit.actions.length > 0) {
@@ -352,6 +402,7 @@ export async function saveBenefitRedemptionAction(input: {
     await syncRedemptionCode(tx, {
       organisationId: input.organisationId,
       organisationSlug: organisation.slug,
+      benefitId: benefit.id,
       benefitCode: benefit.code,
       redeemed: input.redeemed,
       actorId,
@@ -395,10 +446,14 @@ const REQUEST_OPTIONAL_FIELD_MAX = 200;
  * colleague has already requested this". Genuinely exceptional conditions (a
  * database failure) still throw.
  *
- * Two absences are decisions, not oversights: no audit row — the request row
- * itself carries actor, timestamp and content, so creation is
- * self-documenting, and AuditLog earns its place when sub-issue F adds
- * transitions (sub-issue H owns auditing them) — and no rate limiting: the
+ * Creation writes a BENEFIT_REQUEST_RAISED audit row — the first in the app
+ * whose actor is a member, not an admin — so the raise sits in the same
+ * organisation-keyed trail as the transitions that follow it. The member's
+ * free-text note stays OFF the audit row: it lives on the request itself,
+ * and duplicating it into an append-only log that outlives the row would be
+ * gratuitous.
+ *
+ * One absence is a decision, not an oversight — no rate limiting: the
  * partial unique index makes duplicates impossible, every request needs a
  * written note, and the only in-repo limiter (api/contact/submit) is
  * documented as single-process-only and must not be copied into a server
@@ -419,6 +474,7 @@ export async function requestBenefitRedemptionAction(input: {
       message: "Sign in to request a benefit.",
     };
   }
+  const actorEmail = session?.user?.email ?? null;
 
   const note = String(input.note ?? "").trim();
   const preferredTimeframe =
@@ -564,7 +620,7 @@ export async function requestBenefitRedemptionAction(input: {
           };
         }
 
-        await tx.benefitRedemptionRequest.create({
+        const request = await tx.benefitRedemptionRequest.create({
           data: {
             organisationId,
             benefitId: benefitRow.id,
@@ -572,6 +628,23 @@ export async function requestBenefitRedemptionAction(input: {
             preferredTimeframe,
             contactPreference,
             requestedById: userId,
+          },
+          select: { id: true },
+        });
+
+        // Keyed on the organisation like every other benefit audit row, so
+        // the partner's whole history sits under one entityId. The actor is
+        // the requesting MEMBER. No note in data (see the doc comment).
+        await recordAuditLog(tx, {
+          entityType: "OrganisationBenefitRequest",
+          entityId: String(organisationId),
+          action: "BENEFIT_REQUEST_RAISED",
+          actorId: userId,
+          data: {
+            organisationId,
+            benefitCode: benefit.id,
+            requestId: request.id,
+            actorEmail,
           },
         });
 
