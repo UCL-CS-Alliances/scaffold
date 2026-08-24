@@ -64,9 +64,23 @@ function SteppedBenefitRow(props: {
   openRequest: OrganisationBenefitRequest | null;
   /** Redeemed but outside the partner's current tier — marked, not hidden. */
   outOfTier: boolean;
+  /**
+   * Announce a successful save (or clear the announcement on failure). The
+   * message lives in the PARENT's permanent live region: a success here
+   * remounts this row (the parent keys on saved state), so any status text
+   * held locally would be destroyed mid-announcement.
+   */
+  onNotice: (message: string | null) => void;
 }) {
-  const { organisationId, benefit, progress, redeemed, openRequest, outOfTier } =
-    props;
+  const {
+    organisationId,
+    benefit,
+    progress,
+    redeemed,
+    openRequest,
+    outOfTier,
+    onNotice,
+  } = props;
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +104,14 @@ function SteppedBenefitRow(props: {
     !dirty && redeemed !== (steps.length > 0 && serverTicked.size === steps.length);
 
   function save() {
+    // What the save means, matching the server's derivation: all steps
+    // complete ⟺ redeemed.
+    const message = allTicked
+      ? `Saved — ${benefit.label} is marked redeemed.`
+      : redeemed
+        ? `Saved — ${benefit.label} is no longer marked redeemed.`
+        : `Saved — ${benefit.label}: ${draft.size} of ${steps.length} steps complete.`;
+
     startTransition(async () => {
       try {
         await saveBenefitActionProgressAction({
@@ -98,8 +120,12 @@ function SteppedBenefitRow(props: {
           completedActionIds: [...draft],
         });
         setError(null);
+        onNotice(message);
         router.refresh();
       } catch (e) {
+        // The row's own role="alert" announces the failure; a stale success
+        // message must not sit beside it.
+        onNotice(null);
         setError(errorMessage(e));
       }
     });
@@ -234,8 +260,11 @@ function SteplessBenefitRow(props: {
   openRequest: OrganisationBenefitRequest | null;
   /** Redeemed but outside the partner's current tier — marked, not hidden. */
   outOfTier: boolean;
+  /** See SteppedBenefitRow — the announcement must survive the row remount. */
+  onNotice: (message: string | null) => void;
 }) {
-  const { organisationId, benefit, redeemed, openRequest, outOfTier } = props;
+  const { organisationId, benefit, redeemed, openRequest, outOfTier, onNotice } =
+    props;
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -244,6 +273,10 @@ function SteplessBenefitRow(props: {
   const dirty = draft !== redeemed;
 
   function save() {
+    const message = draft
+      ? `Saved — ${benefit.label} is marked redeemed.`
+      : `Saved — ${benefit.label} is no longer marked redeemed.`;
+
     startTransition(async () => {
       try {
         await saveBenefitRedemptionAction({
@@ -252,8 +285,10 @@ function SteplessBenefitRow(props: {
           redeemed: draft,
         });
         setError(null);
+        onNotice(message);
         router.refresh();
       } catch (e) {
+        onNotice(null);
         setError(errorMessage(e));
       }
     });
@@ -337,8 +372,19 @@ export default function BenefitRedemptionChecklist(props: {
 
   const redeemedSet = new Set(redeemedCodes);
 
+  // Success announcement for screen readers. Held HERE and rendered into a
+  // live region that is always in the DOM: a successful save remounts the
+  // row that made it (rows are keyed on saved state), and a live region
+  // inserted at announce time is unreliable — the region must pre-exist and
+  // have its text swapped.
+  const [notice, setNotice] = useState<string | null>(null);
+
   return (
     <>
+      <p className="small" role="status" style={{ margin: notice ? ".25rem 0 0" : 0 }}>
+        {notice}
+      </p>
+
       <p className="small" style={{ marginTop: ".25rem" }}>
         Benefits are recorded for{" "}
         <strong>{organisationName ?? "the organisation"}</strong> as a whole,
@@ -386,6 +432,7 @@ export default function BenefitRedemptionChecklist(props: {
                 redeemed={isRedeemed}
                 openRequest={openRequests[b.id] ?? null}
                 outOfTier={!included}
+                onNotice={setNotice}
               />
             );
           }
@@ -404,6 +451,7 @@ export default function BenefitRedemptionChecklist(props: {
               redeemed={isRedeemed}
               openRequest={openRequests[b.id] ?? null}
               outOfTier={!included}
+              onNotice={setNotice}
             />
           );
         })}
