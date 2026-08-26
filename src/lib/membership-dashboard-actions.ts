@@ -1,10 +1,10 @@
 // src/lib/membership-dashboard-actions.ts
 "use server";
 
-import { Prisma } from "@prisma/client";
+import { BenefitRequestStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
-import { recordAuditLog } from "@/lib/audit-log";
+import { recordAuditLog, type AuditAction } from "@/lib/audit-log";
 import {
   getBenefitCatalogue,
   OPEN_BENEFIT_REQUEST_STATUSES,
@@ -133,12 +133,22 @@ export async function saveBenefitPartnerNoteAction(input: {
  * OrganisationBenefitRedemption audit row the old bulk save wrote, so the
  * admin-facing change history keeps working unchanged. Runs inside the
  * caller's transaction.
+ *
+ * Redemption also CLOSES any open request for the benefit (decision
+ * 2026-08-22): delivery is the natural end of the request's lifecycle, and
+ * leaving it open would keep the admin's open-requests panel contradicting
+ * the checklist above it — the same two-controls-disagree failure the
+ * redemption ⟺ step-completion equivalence exists to remove. Un-redeeming
+ * does NOT reopen anything: the request stays CLOSED and the member requests
+ * again, which the partial unique index (open statuses only) permits.
  */
 async function syncRedemptionCode(
   tx: Prisma.TransactionClient,
   input: {
     organisationId: number;
     organisationSlug: string;
+    /** Benefit DB id, for the request lookup. Callers already hold the row. */
+    benefitId: number;
     benefitCode: string;
     /** Whether the code should be present after this call. */
     redeemed: boolean;
@@ -191,6 +201,45 @@ async function syncRedemptionCode(
       removed: input.redeemed ? [] : [input.benefitCode],
     },
   });
+
+  // Close-on-redeem lives HERE, not in the two callers, so that both writers
+  // (the stepless toggle and the final step of a stepped benefit) get it and
+  // neither can drift: any path that marks the benefit redeemed closes the
+  // partner's open request in the same transaction. The partial unique index
+  // guarantees at most one open row per (organisation, benefit).
+  if (input.redeemed) {
+    const openRequest = await tx.benefitRedemptionRequest.findFirst({
+      where: {
+        organisationId: input.organisationId,
+        benefitId: input.benefitId,
+        status: { in: [...OPEN_BENEFIT_REQUEST_STATUSES] },
+      },
+      select: { id: true, status: true },
+    });
+
+    if (openRequest) {
+      await tx.benefitRedemptionRequest.update({
+        where: { id: openRequest.id },
+        data: { status: BenefitRequestStatus.CLOSED },
+      });
+
+      await recordAuditLog(tx, {
+        entityType: "OrganisationBenefitRequest",
+        entityId: String(input.organisationId),
+        action: "BENEFIT_REQUEST_CLOSED",
+        actorId: input.actorId,
+        data: {
+          organisationId: input.organisationId,
+          benefitCode: input.benefitCode,
+          requestId: openRequest.id,
+          actorEmail: input.actorEmail,
+          previousStatus: openRequest.status,
+          nextStatus: BenefitRequestStatus.CLOSED,
+          reason: "DELIVERED",
+        },
+      });
+    }
+  }
 }
 
 /**
@@ -303,6 +352,7 @@ export async function saveBenefitActionProgressAction(input: {
     await syncRedemptionCode(tx, {
       organisationId,
       organisationSlug: organisation.slug,
+      benefitId: benefit.id,
       benefitCode: benefit.code,
       redeemed: stepIds.size > 0 && submitted.length === stepIds.size,
       actorId,
@@ -334,7 +384,7 @@ export async function saveBenefitRedemptionAction(input: {
   await prisma.$transaction(async (tx) => {
     const benefit = await tx.benefit.findUnique({
       where: { code: input.benefitCode },
-      select: { code: true, actions: { select: { id: true }, take: 1 } },
+      select: { id: true, code: true, actions: { select: { id: true }, take: 1 } },
     });
     if (!benefit) throw new Error(`Unknown benefit code: ${input.benefitCode}`);
     if (benefit.actions.length > 0) {
@@ -352,6 +402,7 @@ export async function saveBenefitRedemptionAction(input: {
     await syncRedemptionCode(tx, {
       organisationId: input.organisationId,
       organisationSlug: organisation.slug,
+      benefitId: benefit.id,
       benefitCode: benefit.code,
       redeemed: input.redeemed,
       actorId,
@@ -395,10 +446,14 @@ const REQUEST_OPTIONAL_FIELD_MAX = 200;
  * colleague has already requested this". Genuinely exceptional conditions (a
  * database failure) still throw.
  *
- * Two absences are decisions, not oversights: no audit row — the request row
- * itself carries actor, timestamp and content, so creation is
- * self-documenting, and AuditLog earns its place when sub-issue F adds
- * transitions (sub-issue H owns auditing them) — and no rate limiting: the
+ * Creation writes a BENEFIT_REQUEST_RAISED audit row — the first in the app
+ * whose actor is a member, not an admin — so the raise sits in the same
+ * organisation-keyed trail as the transitions that follow it. The member's
+ * free-text note stays OFF the audit row: it lives on the request itself,
+ * and duplicating it into an append-only log that outlives the row would be
+ * gratuitous.
+ *
+ * One absence is a decision, not an oversight — no rate limiting: the
  * partial unique index makes duplicates impossible, every request needs a
  * written note, and the only in-repo limiter (api/contact/submit) is
  * documented as single-process-only and must not be copied into a server
@@ -419,6 +474,7 @@ export async function requestBenefitRedemptionAction(input: {
       message: "Sign in to request a benefit.",
     };
   }
+  const actorEmail = session?.user?.email ?? null;
 
   const note = String(input.note ?? "").trim();
   const preferredTimeframe =
@@ -564,7 +620,7 @@ export async function requestBenefitRedemptionAction(input: {
           };
         }
 
-        await tx.benefitRedemptionRequest.create({
+        const request = await tx.benefitRedemptionRequest.create({
           data: {
             organisationId,
             benefitId: benefitRow.id,
@@ -572,6 +628,23 @@ export async function requestBenefitRedemptionAction(input: {
             preferredTimeframe,
             contactPreference,
             requestedById: userId,
+          },
+          select: { id: true },
+        });
+
+        // Keyed on the organisation like every other benefit audit row, so
+        // the partner's whole history sits under one entityId. The actor is
+        // the requesting MEMBER. No note in data (see the doc comment).
+        await recordAuditLog(tx, {
+          entityType: "OrganisationBenefitRequest",
+          entityId: String(organisationId),
+          action: "BENEFIT_REQUEST_RAISED",
+          actorId: userId,
+          data: {
+            organisationId,
+            benefitCode: benefit.id,
+            requestId: request.id,
+            actorEmail,
           },
         });
 
@@ -594,4 +667,181 @@ export async function requestBenefitRedemptionAction(input: {
     }
     throw error;
   }
+}
+
+// The request lifecycle ladder is REQUESTED → ACKNOWLEDGED → IN_PROGRESS →
+// CLOSED. The admin transitions below move a request along it; "delivered"
+// is deliberately NOT one of them — for a stepped benefit redemption is
+// derived from step completion, and a second writer to redeemedBenefitCodes
+// would break that equivalence. Delivery happens in the redemption
+// checklist, and syncRedemptionCode closes the request from there.
+
+// A stale page must not quietly move a request twice, so an illegal
+// transition throws with the request's actual current status.
+function illegalTransitionMessage(status: BenefitRequestStatus): string {
+  switch (status) {
+    case BenefitRequestStatus.CLOSED:
+      return "This request has already been closed — reload and try again.";
+    case BenefitRequestStatus.IN_PROGRESS:
+      return "This request is already being worked on — reload and try again.";
+    case BenefitRequestStatus.ACKNOWLEDGED:
+      return "This request has already been acknowledged — reload and try again.";
+    case BenefitRequestStatus.REQUESTED:
+      return "This request is still awaiting acknowledgement — reload and try again.";
+  }
+}
+
+/**
+ * Shared implementation of the admin request transitions: load the request,
+ * validate the move against the ladder, apply it and write one audit row,
+ * all in one transaction. The organisation and benefit code are read through
+ * the request's relations here, never taken from the caller — the client
+ * sends a request id and nothing else that matters.
+ */
+async function transitionBenefitRequest(input: {
+  requestId: number;
+  allowedFrom: readonly BenefitRequestStatus[];
+  nextStatus: BenefitRequestStatus;
+  auditAction: AuditAction;
+  actorId: string | null;
+  actorEmail: string | null;
+  updateData?: Prisma.BenefitRedemptionRequestUncheckedUpdateInput;
+  auditData?: Prisma.InputJsonObject;
+}) {
+  await prisma.$transaction(async (tx) => {
+    const request = await tx.benefitRedemptionRequest.findUnique({
+      where: { id: input.requestId },
+      select: {
+        id: true,
+        status: true,
+        organisationId: true,
+        benefit: { select: { code: true } },
+      },
+    });
+    if (!request) {
+      throw new Error("This request no longer exists — reload and try again.");
+    }
+
+    if (!input.allowedFrom.includes(request.status)) {
+      throw new Error(illegalTransitionMessage(request.status));
+    }
+
+    await tx.benefitRedemptionRequest.update({
+      where: { id: request.id },
+      data: { status: input.nextStatus, ...input.updateData },
+    });
+
+    await recordAuditLog(tx, {
+      entityType: "OrganisationBenefitRequest",
+      entityId: String(request.organisationId),
+      action: input.auditAction,
+      actorId: input.actorId,
+      data: {
+        organisationId: request.organisationId,
+        benefitCode: request.benefit.code,
+        requestId: request.id,
+        actorEmail: input.actorEmail,
+        previousStatus: request.status,
+        nextStatus: input.nextStatus,
+        ...input.auditData,
+      },
+    });
+  });
+}
+
+/**
+ * An admin tells the partner their request was seen. Records who
+ * acknowledged and when on the request row itself. Authorisation is any
+ * admin, not only the assigned client experience manager (2026-07-31
+ * decision 6) — the CEM is who normally acts, but cover during leave must be
+ * possible.
+ */
+export async function acknowledgeBenefitRequestAction(input: {
+  requestId: number;
+}) {
+  const session = await getServerAuthSession();
+  // Cast via a narrow shape rather than `any`, so the tracked no-explicit-any
+  // lint baseline does not grow.
+  const user = session?.user as { roleKeys?: unknown } | undefined;
+  requireAdmin(user?.roleKeys);
+
+  const actorId = session?.user?.id ?? null;
+  const actorEmail = session?.user?.email ?? null;
+
+  await transitionBenefitRequest({
+    requestId: input.requestId,
+    allowedFrom: [BenefitRequestStatus.REQUESTED],
+    nextStatus: BenefitRequestStatus.ACKNOWLEDGED,
+    auditAction: "BENEFIT_REQUEST_ACKNOWLEDGED",
+    actorId,
+    actorEmail,
+    updateData: { acknowledgedAt: new Date(), acknowledgedById: actorId },
+  });
+}
+
+/**
+ * An admin marks a request as being worked on. Legal straight from
+ * REQUESTED too — acknowledgement is a courtesy step, not a gate.
+ */
+export async function startBenefitRequestAction(input: { requestId: number }) {
+  const session = await getServerAuthSession();
+  // Cast via a narrow shape rather than `any`, so the tracked no-explicit-any
+  // lint baseline does not grow.
+  const user = session?.user as { roleKeys?: unknown } | undefined;
+  requireAdmin(user?.roleKeys);
+
+  const actorId = session?.user?.id ?? null;
+  const actorEmail = session?.user?.email ?? null;
+
+  await transitionBenefitRequest({
+    requestId: input.requestId,
+    allowedFrom: [
+      BenefitRequestStatus.REQUESTED,
+      BenefitRequestStatus.ACKNOWLEDGED,
+    ],
+    nextStatus: BenefitRequestStatus.IN_PROGRESS,
+    auditAction: "BENEFIT_REQUEST_STARTED",
+    actorId,
+    actorEmail,
+  });
+}
+
+/**
+ * An admin closes a request WITHOUT delivering it — a mistaken or abandoned
+ * request would otherwise sit open forever and block re-requesting, since
+ * members do not withdraw through the dashboard (2026-07-31 decision 3).
+ * Deliberately does not touch redeemedBenefitCodes: nothing was delivered.
+ * The audit reason distinguishes this from syncRedemptionCode's DELIVERED
+ * close; the optional free text is the admin's, and the audit row is its
+ * only home — the request row has no column for it.
+ */
+export async function closeBenefitRequestAction(input: {
+  requestId: number;
+  reason?: string;
+}) {
+  const session = await getServerAuthSession();
+  // Cast via a narrow shape rather than `any`, so the tracked no-explicit-any
+  // lint baseline does not grow.
+  const user = session?.user as { roleKeys?: unknown } | undefined;
+  requireAdmin(user?.roleKeys);
+
+  const actorId = session?.user?.id ?? null;
+  const actorEmail = session?.user?.email ?? null;
+
+  const reasonText = String(input.reason ?? "").trim() || null;
+  if ((reasonText?.length ?? 0) > REQUEST_OPTIONAL_FIELD_MAX) {
+    throw new Error(
+      `The reason can be at most ${REQUEST_OPTIONAL_FIELD_MAX} characters.`,
+    );
+  }
+
+  await transitionBenefitRequest({
+    requestId: input.requestId,
+    allowedFrom: OPEN_BENEFIT_REQUEST_STATUSES,
+    nextStatus: BenefitRequestStatus.CLOSED,
+    auditAction: "BENEFIT_REQUEST_CLOSED",
+    actorId,
+    actorEmail,
+    auditData: { reason: "CLOSED_BY_ADMIN", reasonText },
+  });
 }

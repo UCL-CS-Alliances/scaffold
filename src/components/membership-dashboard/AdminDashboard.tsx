@@ -5,6 +5,7 @@ import type {
   AdminBenefitAuditEntry,
   AdminBenefitRedemptionStat,
   AdminMemberListItem,
+  AdminOpenBenefitRequest,
   AdminSelectedMember,
   MembershipTierOption,
 } from "@/lib/membership-dashboard-admin";
@@ -32,6 +33,7 @@ type AdminDashboardProps = AdminDashboardSummary & {
   editorBenefits: EditorBenefit[];
   tierOptions: MembershipTierOption[];
   benefitStats: AdminBenefitRedemptionStat[];
+  openRequestQueue: AdminOpenBenefitRequest[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
   partnerNotes: Record<string, string>;
   partnerProgress: BenefitActionProgressMap;
@@ -64,6 +66,7 @@ export default function AdminDashboard({
   editorBenefits,
   tierOptions,
   benefitStats,
+  openRequestQueue,
   benefitAuditTrail,
   partnerNotes,
   partnerProgress,
@@ -100,6 +103,7 @@ export default function AdminDashboard({
           editorBenefits={editorBenefits}
           tierOptions={tierOptions}
           benefitStats={benefitStats}
+          openRequestQueue={openRequestQueue}
           benefitAuditTrail={benefitAuditTrail}
           partnerNotes={partnerNotes}
           partnerProgress={partnerProgress}

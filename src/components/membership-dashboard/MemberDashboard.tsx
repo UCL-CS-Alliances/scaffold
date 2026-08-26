@@ -80,30 +80,45 @@ export default function MemberDashboard(props: MemberDashboardProps) {
       ? membershipManagerName
       : getSatTeamManager().name;
 
-  // Build benefit rows with computed state. Precedence: locked → redeemed →
-  // requested → available. All three open request statuses (requested /
-  // acknowledged / working on it) collapse into one "requested" row state for
-  // now — only REQUESTED is reachable today; when sub-issue F makes the
-  // others live, split on openBenefitRequests[b.id].status here.
+  // Build benefit rows with computed state. Precedence: redeemed → locked →
+  // requested → available. Redeemed comes FIRST (2026-08-22): a delivered
+  // benefit reads ✅ even when the current tier no longer includes it — the
+  // old locked-first order hid such redemptions behind 🔒. The three open
+  // request statuses share the single "requested" filter state (so one
+  // toolbar toggle covers them all) but carry their own glyph and label,
+  // matching the detail page.
   const benefitRows = useMemo(() => {
     return benefitsEffective.map((b) => {
       let state: Exclude<BenefitFilter, null> = "locked";
       let symbol = "🔒";
+      let stateLabel = "Not included in your tier";
 
-      if (hasBenefitAccess(myRank, b.tierMinRank)) {
-        if (redeemed.has(b.id)) {
-          state = "redeemed";
-          symbol = "✅";
-        } else if (openBenefitRequests[b.id]) {
+      if (redeemed.has(b.id)) {
+        state = "redeemed";
+        symbol = "✅";
+        stateLabel = "Redeemed";
+      } else if (hasBenefitAccess(myRank, b.tierMinRank)) {
+        const request = openBenefitRequests[b.id];
+        if (request?.status === "ACKNOWLEDGED") {
+          state = "requested";
+          symbol = "📬";
+          stateLabel = "Acknowledged";
+        } else if (request?.status === "IN_PROGRESS") {
+          state = "requested";
+          symbol = "🔧";
+          stateLabel = "Working on it";
+        } else if (request) {
           state = "requested";
           symbol = "⏳";
+          stateLabel = "Requested";
         } else {
           state = "available";
           symbol = "🟡";
+          stateLabel = "Available";
         }
       }
 
-      return { benefit: b, state, symbol };
+      return { benefit: b, state, symbol, stateLabel };
     });
   }, [benefitsEffective, myRank, redeemed, openBenefitRequests]);
 
@@ -175,11 +190,16 @@ export default function MemberDashboard(props: MemberDashboardProps) {
           className="list-plain stack"
           style={{ "--stack-gap": ".5rem" } as CSSProperties}
         >
-          {visibleRows.map(({ benefit: b, symbol }) => (
+          {visibleRows.map(({ benefit: b, symbol, stateLabel }) => (
             <li key={b.id}>
               <div className="tile" style={{ padding: ".5rem .75rem" }}>
                 <div className="benefit">
-                  <span className="benefit-state">{symbol}</span>
+                  {/* The glyph is decorative; the state is announced by the
+                      sr-only text so it never rides on the emoji alone. */}
+                  <span className="benefit-state" aria-hidden="true">
+                    {symbol}
+                  </span>
+                  <span className="sr-only">{stateLabel}</span>
                   <Link
                     href={`/membership-dashboard/benefits/${b.id}`}
                     className="benefit-link"

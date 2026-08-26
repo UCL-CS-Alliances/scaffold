@@ -14,13 +14,29 @@ import type {
   AdminBenefitAuditEntry,
   AdminBenefitRedemptionStat,
   AdminMemberListItem,
+  AdminOpenBenefitRequest,
   AdminSelectedMember,
   MembershipTierOption,
 } from "@/lib/membership-dashboard-admin";
 import type { HandbookRenderResult } from "@/lib/handbook";
+import {
+  acknowledgeBenefitRequestAction,
+  closeBenefitRequestAction,
+  startBenefitRequestAction,
+} from "@/lib/membership-dashboard-actions";
 import BenefitCatalogueEditor from "./BenefitCatalogueEditor";
 import BenefitPartnerNotes from "./BenefitPartnerNotes";
-import BenefitRedemptionChecklist from "./BenefitRedemptionChecklist";
+import BenefitRedemptionChecklist, {
+  requestStatusLabel,
+} from "./BenefitRedemptionChecklist";
+
+// Server actions throw on failure; the message is shown as-is in development
+// but masked by Next.js in production, so keep a usable fallback.
+function errorMessage(e: unknown) {
+  return e instanceof Error && e.message
+    ? e.message
+    : "The change could not be saved.";
+}
 
 type TabKey = "members" | "benefits" | "handbook";
 
@@ -30,12 +46,13 @@ function asTabKey(v: string | null | undefined): TabKey | null {
 }
 
 // The benefits tab's no-selection view: redemption stats by default, with the
-// catalogue editor as a deliberate ?view= destination (same guard style as
-// asTabKey; talent-discovery's ?view= is the precedent).
-type BenefitsViewKey = "stats" | "editor";
+// catalogue editor and the cross-partner request queue as deliberate ?view=
+// destinations (same guard style as asTabKey; talent-discovery's ?view= is
+// the precedent).
+type BenefitsViewKey = "stats" | "editor" | "requests";
 
 function asBenefitsViewKey(v: string | null | undefined): BenefitsViewKey | null {
-  if (v === "stats" || v === "editor") return v;
+  if (v === "stats" || v === "editor" || v === "requests") return v;
   return null;
 }
 
@@ -62,21 +79,29 @@ function benefitLabel(benefits: CatalogueBenefit[], code: string) {
   return benefits.find((b) => b.id === code)?.label ?? code;
 }
 
-// Only the open statuses ever reach this map — the resolver excludes CLOSED —
-// and only REQUESTED is written today; the other two are sub-issue F's.
-function requestStatusLabel(status: OrganisationBenefitRequest["status"]) {
-  switch (status) {
-    case "ACKNOWLEDGED":
-      return "Acknowledged";
-    case "IN_PROGRESS":
-      return "Working on it";
-    default:
+// A request audit entry reads as its lifecycle event. The close reason
+// distinguishes delivery (written by syncRedemptionCode) from an admin
+// closing without delivering.
+function requestAuditLabel(entry: AdminBenefitAuditEntry) {
+  switch (entry.action) {
+    case "BENEFIT_REQUEST_RAISED":
       return "Requested";
+    case "BENEFIT_REQUEST_ACKNOWLEDGED":
+      return "Acknowledged";
+    case "BENEFIT_REQUEST_STARTED":
+      return "Started work";
+    case "BENEFIT_REQUEST_CLOSED":
+      return entry.reason === "DELIVERED"
+        ? "Closed (delivered)"
+        : "Closed without delivering";
+    default:
+      return entry.action;
   }
 }
 
-// Actor display for an audit entry; actorId is nulled when the admin account
-// is deleted, so fall back to the email denormalised into the record.
+// Actor display for an audit entry; actorId is nulled when the account is
+// deleted (an admin's, or — for a raised request — a member's), so fall back
+// to the email denormalised into the record.
 function auditActorLabel(entry: AdminBenefitAuditEntry) {
   if (entry.actorDeleted) {
     return `${entry.actorEmail ?? "Unknown actor"} (deleted account)`;
@@ -84,6 +109,128 @@ function auditActorLabel(entry: AdminBenefitAuditEntry) {
   return entry.actorName
     ? `${entry.actorName}${entry.actorEmail ? ` (${entry.actorEmail})` : ""}`
     : entry.actorEmail ?? "Unknown actor";
+}
+
+/**
+ * One open request, with its transition controls (sub-issue F). Acknowledge
+ * and Start work follow the ladder; Close is always available and closes
+ * WITHOUT delivering — delivery happens in the redemption checklist below,
+ * which closes the request itself. router.refresh() is the save-flow
+ * convention (same URL), matching the checklist and partner notes.
+ */
+function OpenBenefitRequestRow(props: {
+  request: OrganisationBenefitRequest;
+  benefits: CatalogueBenefit[];
+}) {
+  const { request, benefits } = props;
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function run(action: () => Promise<void>) {
+    startTransition(async () => {
+      try {
+        await action();
+        setError(null);
+        router.refresh();
+      } catch (e) {
+        setError(errorMessage(e));
+      }
+    });
+  }
+
+  function close() {
+    const confirmed = window.confirm(
+      "Close this request without delivering it? The benefit will not be " +
+        "marked redeemed, and the partner would need to request it again. " +
+        "The change is recorded in the audit trail.",
+    );
+    if (!confirmed) return;
+    run(() => closeBenefitRequestAction({ requestId: request.id }));
+  }
+
+  return (
+    <li
+      className="tile"
+      style={{
+        padding: ".6rem .75rem",
+        marginBottom: ".5rem",
+      }}
+    >
+      <div className="cluster" style={{ alignItems: "center" }}>
+        <strong>{benefitLabel(benefits, request.benefitCode)}</strong>
+        <span className="pill">{requestStatusLabel(request.status)}</span>
+      </div>
+
+      <div className="small" style={{ marginTop: ".25rem" }}>
+        Requested by {request.requestedByName ?? "Unknown contact"} on{" "}
+        {formatDateTimeGB(request.requestedAt)}
+      </div>
+
+      <p style={{ whiteSpace: "pre-wrap", margin: ".4rem 0 0" }}>
+        {request.note}
+      </p>
+
+      {request.preferredTimeframe && (
+        <p className="small" style={{ margin: ".4rem 0 0" }}>
+          Preferred timeframe: {request.preferredTimeframe}
+        </p>
+      )}
+      {request.contactPreference && (
+        <p className="small" style={{ margin: ".25rem 0 0" }}>
+          Best contact: {request.contactPreference}
+        </p>
+      )}
+
+      <div className="cluster" style={{ marginTop: ".5rem" }}>
+        {request.status === "REQUESTED" && (
+          <button
+            type="button"
+            className="button-link"
+            onClick={() =>
+              run(() =>
+                acknowledgeBenefitRequestAction({ requestId: request.id }),
+              )
+            }
+            disabled={isPending}
+            aria-disabled={isPending}
+          >
+            Acknowledge
+          </button>
+        )}
+        {(request.status === "REQUESTED" ||
+          request.status === "ACKNOWLEDGED") && (
+          <button
+            type="button"
+            className="button-link"
+            onClick={() =>
+              run(() => startBenefitRequestAction({ requestId: request.id }))
+            }
+            disabled={isPending}
+            aria-disabled={isPending}
+          >
+            Start work
+          </button>
+        )}
+        <button
+          type="button"
+          className="button-link button-link--secondary"
+          onClick={close}
+          disabled={isPending}
+          aria-disabled={isPending}
+        >
+          Close request
+        </button>
+        {isPending && <span className="small">Saving…</span>}
+      </div>
+
+      {error && (
+        <p className="small" role="alert" style={{ marginTop: ".25rem" }}>
+          {error}
+        </p>
+      )}
+    </li>
+  );
 }
 
 function tierIcon(tierMin: string) {
@@ -102,6 +249,7 @@ export default function AdminDashboardClient(props: {
   editorBenefits: EditorBenefit[];
   tierOptions: MembershipTierOption[];
   benefitStats: AdminBenefitRedemptionStat[];
+  openRequestQueue: AdminOpenBenefitRequest[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
   partnerNotes: Record<string, string>;
   partnerProgress: BenefitActionProgressMap;
@@ -118,6 +266,7 @@ export default function AdminDashboardClient(props: {
     editorBenefits,
     tierOptions,
     benefitStats,
+    openRequestQueue,
     benefitAuditTrail,
     partnerNotes,
     partnerProgress,
@@ -511,7 +660,9 @@ export default function AdminDashboardClient(props: {
                 <h3 style={{ marginTop: 0 }}>
                   {benefitsView === "editor"
                     ? "Benefit catalogue editor"
-                    : "Benefits overview"}
+                    : benefitsView === "requests"
+                      ? "Open requests across all partners"
+                      : "Benefits overview"}
                 </h3>
 
                 <div className="cluster" style={{ marginBottom: ".75rem" }}>
@@ -522,6 +673,14 @@ export default function AdminDashboardClient(props: {
                     onClick={() => changeBenefitsView("stats")}
                   >
                     Redemption stats
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab ${benefitsView === "requests" ? "is-active" : ""}`}
+                    aria-pressed={benefitsView === "requests"}
+                    onClick={() => changeBenefitsView("requests")}
+                  >
+                    Open requests
                   </button>
                   <button
                     type="button"
@@ -539,6 +698,64 @@ export default function AdminDashboardClient(props: {
                     tierOptions={tierOptions}
                     stepProgressCounts={stepProgressCounts}
                   />
+                ) : benefitsView === "requests" ? (
+                  openRequestQueue.length === 0 ? (
+                    <p className="small">
+                      No open requests across any partner.
+                    </p>
+                  ) : (
+                    <div className="table-wrap">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Partner</th>
+                            <th>Benefit</th>
+                            <th>Status</th>
+                            <th>Requested</th>
+                            <th>Tier</th>
+                            <th>Client of</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {openRequestQueue.map((item) => (
+                            <tr key={item.requestId}>
+                              <td>
+                                {/* Any admin may act (decision 6); the link
+                                    lands on the partner's benefits panel so
+                                    they can. No contacts left → no link,
+                                    rather than a dead one. */}
+                                {item.linkUserId ? (
+                                  <Link
+                                    href={`/membership-dashboard?tab=benefits&userId=${encodeURIComponent(item.linkUserId)}`}
+                                  >
+                                    <strong>{item.organisationName}</strong>
+                                  </Link>
+                                ) : (
+                                  <strong>{item.organisationName}</strong>
+                                )}
+                              </td>
+                              <td>{benefitLabel(benefits, item.benefitCode)}</td>
+                              <td>
+                                <span className="pill">
+                                  {requestStatusLabel(item.status)}
+                                </span>
+                              </td>
+                              <td>
+                                {formatDateTimeGB(item.requestedAt)}
+                                <div className="small">
+                                  by {item.requestedByName ?? "Unknown contact"}
+                                </div>
+                              </td>
+                              <td>{item.tierLabel ?? "No active membership"}</td>
+                              <td>
+                                {item.managerName ?? "Strategic Alliances Team"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
                 ) : (
                 <div className="table-wrap">
                   <table className="table">
@@ -548,6 +765,7 @@ export default function AdminDashboardClient(props: {
                         <th>Eligible members</th>
                         <th>Redeemed</th>
                         <th>% Redeemed</th>
+                        <th>Requested</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -569,6 +787,7 @@ export default function AdminDashboardClient(props: {
                             <td>{stat?.eligible ?? "—"}</td>
                             <td>{stat?.redeemed ?? "—"}</td>
                             <td>{pct}</td>
+                            <td>{stat?.requested ?? "—"}</td>
                           </tr>
                         );
                       })}
@@ -579,8 +798,9 @@ export default function AdminDashboardClient(props: {
               </>
             ) : (
               <>
-                {/* What was asked for, above what was delivered. Read-only:
-                    acknowledging and progressing requests is sub-issue F. */}
+                {/* What was asked for, above what was delivered. Each row
+                    carries its own transition controls; delivery itself
+                    happens in the checklist below. */}
                 <h3 style={{ marginTop: 0 }}>Open benefit requests</h3>
 
                 {(() => {
@@ -601,54 +821,15 @@ export default function AdminDashboardClient(props: {
                   return (
                     <ul className="list-plain">
                       {openRequests.map((request) => (
-                        <li
+                        <OpenBenefitRequestRow
                           key={request.id}
-                          className="tile"
-                          style={{
-                            padding: ".6rem .75rem",
-                            marginBottom: ".5rem",
-                          }}
-                        >
-                          <div className="cluster" style={{ alignItems: "center" }}>
-                            <strong>
-                              {benefitLabel(benefits, request.benefitCode)}
-                            </strong>
-                            <span className="pill">
-                              {requestStatusLabel(request.status)}
-                            </span>
-                          </div>
-
-                          <div className="small" style={{ marginTop: ".25rem" }}>
-                            Requested by{" "}
-                            {request.requestedByName ?? "Unknown contact"} on{" "}
-                            {formatDateTimeGB(request.requestedAt)}
-                          </div>
-
-                          <p style={{ whiteSpace: "pre-wrap", margin: ".4rem 0 0" }}>
-                            {request.note}
-                          </p>
-
-                          {request.preferredTimeframe && (
-                            <p className="small" style={{ margin: ".4rem 0 0" }}>
-                              Preferred timeframe: {request.preferredTimeframe}
-                            </p>
-                          )}
-                          {request.contactPreference && (
-                            <p className="small" style={{ margin: ".25rem 0 0" }}>
-                              Best contact: {request.contactPreference}
-                            </p>
-                          )}
-                        </li>
+                          request={request}
+                          benefits={benefits}
+                        />
                       ))}
                     </ul>
                   );
                 })()}
-
-                <p className="small">
-                  Acknowledging and progressing requests from here is planned
-                  for a later release — for now, action them with the partner
-                  directly.
-                </p>
 
                 <h3 style={{ marginTop: "1.5rem" }}>
                   Benefit redemption checklist
@@ -662,6 +843,7 @@ export default function AdminDashboardClient(props: {
                     memberRank={selectedMember.membershipTierRank}
                     redeemedCodes={selectedMember.redeemedBenefitCodes}
                     progress={partnerProgress}
+                    openRequests={partnerOpenRequests}
                   />
                 )}
 
@@ -701,18 +883,29 @@ export default function AdminDashboardClient(props: {
                             {auditActorLabel(entry)}
                           </div>
 
-                          <div className="cluster" style={{ marginTop: ".4rem" }}>
-                            {entry.added.map((code) => (
-                              <span key={`added-${code}`} className="pill">
-                                + {benefitLabel(benefits, code)}
-                              </span>
-                            ))}
-                            {entry.removed.map((code) => (
-                              <span key={`removed-${code}`} className="pill">
-                                − {benefitLabel(benefits, code)}
-                              </span>
-                            ))}
-                          </div>
+                          {entry.kind === "REQUEST" ? (
+                            <div style={{ marginTop: ".4rem" }}>
+                              {requestAuditLabel(entry)} —{" "}
+                              <em>
+                                {entry.benefitCode
+                                  ? benefitLabel(benefits, entry.benefitCode)
+                                  : "Unknown benefit"}
+                              </em>
+                            </div>
+                          ) : (
+                            <div className="cluster" style={{ marginTop: ".4rem" }}>
+                              {entry.added.map((code) => (
+                                <span key={`added-${code}`} className="pill">
+                                  + {benefitLabel(benefits, code)}
+                                </span>
+                              ))}
+                              {entry.removed.map((code) => (
+                                <span key={`removed-${code}`} className="pill">
+                                  − {benefitLabel(benefits, code)}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </li>
                       ))}
                     </ul>
