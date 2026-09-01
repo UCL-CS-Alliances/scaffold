@@ -6,7 +6,7 @@ Shared runbook for developing, reviewing, and releasing the Alliances Platform o
 
 - Every push to a PR branch creates or updates that PR's Vercel **Preview** (unique URL).
 - A reviewed merge into `main` updates Vercel **Production**.
-- Preview and Production temporarily share one Supabase project containing demo data only. They will be split later (see "Separating the databases").
+- Preview and Production use **separate Supabase projects** (Free plan allows two projects per account, so they live in two accounts): Production is `membership-prod` in the original **account A**; Preview is `membership-preview` in the newer **account B**, holding demo data only. See "Preview/Production database split".
 - Database schema changes are Prisma migrations committed to Git. Never edit the remote schema directly in the Supabase dashboard.
 - Env vars are managed centrally in Vercel by the deployment owner. Do not paste secrets into chat, tickets, or `.env` attachments.
 
@@ -29,8 +29,8 @@ the first Production build uses the reviewed configuration.
 
 | Variable | Local (`.env.local`) | Preview | Production | Notes |
 |---|---|---|---|---|
-| `DATABASE_URL` | pooled `:6543` | ✅ same shared DB | ✅ same shared DB | Runtime. Supavisor **transaction** mode, `pgbouncer=true&connection_limit=1&sslmode=require`. |
-| `DIRECT_URL` | session `:5432` | — | — | Prisma CLI (migrate/seed) only. Keep it in the deployment owner's ignored `.env.local`; do not add it to Vercel. |
+| `DATABASE_URL` | pooled `:6543` | ✅ `membership-preview` | ✅ `membership-prod` | Runtime. Supavisor **transaction** mode, `pgbouncer=true&connection_limit=1&sslmode=require`. Same name, different value per scope. |
+| `DIRECT_URL` | session `:5432` | — | — | Prisma CLI (migrate/seed) only. Keep it in the deployment owner's ignored `.env.local`, switched per database when applying migrations; do not add it to Vercel. |
 | `NEXTAUTH_SECRET` | random | ✅ (its own) | ✅ (its own) | Server-only. Use **different** secrets per environment. `openssl rand -base64 32`. |
 | `NEXTAUTH_URL` | `http://localhost:3000` | **unset** | `https://<prod-host>` | Leave unset on Preview so NextAuth uses the per-deployment URL. |
 | `CONTACT_FROM_EMAIL` | optional | optional | optional | Only the From header; email uses Ethereal test accounts until Graph/SMTP is added. |
@@ -62,29 +62,19 @@ Migrations in `prisma/migrations/` are the schema authority.
 3. Test against a disposable local database, update the seed if needed, and commit the schema **plus** the new migration directory.
 4. Mark the PR **Database migration required** and tell the deployment owner.
 
-**When a migration needs to move data, not just change shape**, generate it without applying it and hand-edit the result:
+**Deployment owner (apply to each database)**
+1. Point `.env.local`'s `DIRECT_URL` at `membership-preview`'s session connection, `npm run db:migrate:deploy`, verify status/constraints, and redeploy/retest the PR Preview if it built before the migration.
+2. When the PR is ready to merge, repeat against `membership-prod` (take a backup first if it changes existing data), then restore your original `.env.local`.
+3. Apply each migration once **per database**; never let serverless builds run migrations.
 
-1. `npx prisma migrate dev --create-only --name <descriptive-name>` — writes the SQL, applies nothing.
-2. Interleave your `UPDATE`/`DELETE` statements among the generated DDL. Let Prisma generate all DDL and copy its constraint names; only the data statements are yours. Order matters — backfill before adding `NOT NULL` or a unique index, so the constraint is only checked once the data can satisfy it.
-3. `npx prisma migrate dev` to apply locally and regenerate the client.
-
-Prisma runs each migration file in one transaction and PostgreSQL has transactional DDL, so a failed backfill rolls the whole file back. Point `DATABASE_URL` at a scratch database first: `--create-only` still provisions a shadow database on whatever it points at, which must never be the shared Supabase project.
-
-> **`User_primary_contact_per_organisation_key` is invisible to `schema.prisma`.** Prisma cannot express a partial unique index, so this one lives only in `20260804130100_add_primary_contact_unique_index`. Verified on Prisma 6.19.3 that this causes **no** drift — the differ ignores partial indexes rather than trying to drop what it cannot represent, and `migrate dev --create-only` against a database carrying it produces an empty migration. Worth re-checking after a major Prisma upgrade: if a generated migration ever contains `DROP INDEX "User_primary_contact_per_organisation_key"`, delete that line before applying.
-
-**Deployment owner (apply to the shared DB)**
-1. Point `.env.local`'s `DIRECT_URL` at the shared Supabase session connection.
-2. `npm run db:migrate:deploy`, then verify status/constraints.
-3. Redeploy/retest the PR Preview if it built before the migration.
-
-Never edit or delete a merged migration, never `prisma db push` against the shared DB, and never change schema in Supabase's SQL/Table editor. Do not run migrations automatically on every serverless build — concurrent PR/Production builds share the DB and can race. CI validates the full migration history + seed against an ephemeral Postgres, so this is caught without touching Supabase.
+Never edit or delete a merged migration, never `prisma db push` against a remote database, and never change schema in Supabase's SQL/Table editor. Do not run migrations automatically on every serverless build — apply each reviewed migration once per database through the workflow above. CI validates the full migration history + seed against an ephemeral Postgres, so this is caught without touching Supabase.
 
 ## Release smoke test
 
 - [ ] `npm ci`, `npm run typecheck`, and `npm run build` pass (`prisma generate` runs in `postinstall`). `npm run lint` is informational in CI while pre-existing `no-explicit-any` debt is cleared.
 - [ ] Deployment target says **Preview** during PR review, **Production** only after merge to `main`.
 - [ ] `GET /api/health` returns HTTP 200 `{ "status": "ok" }`.
-- [ ] The Supabase project reference matches the shared synthetic-data project.
+- [ ] The Supabase project reference matches the environment: `alliances-platform/preview` during PR review, `alliances-platform/prod` for Production.
 - [ ] Required migrations applied; constraints/row counts verified.
 - [ ] Sign-in and role/route protection work.
 - [ ] No secret appears in source, logs, browser bundles, or `NEXT_PUBLIC_*`.
@@ -111,14 +101,15 @@ To keep `main` automatic while making PR Previews manual, add to `vercel.json`:
 
 Then create a Preview on demand from **Deployments -> Create Deployment**.
 
-## Separating the databases later
+## Preview/Production database split
 
-The shared database is a temporary cost-saving arrangement. To split:
+Free Supabase caps an account at two projects, so the two production databases (this app and IXN) live in the original **account** and the two preview databases live in the **alliances@uclcomputerscience.org account**. The original shared project became `membership-prod` in place — no data migration — and a fresh empty `membership-preview` was created in account B. Redo this only when provisioning a replacement preview project.
 
-1. Create a separate Supabase project for Production (never reuse the Preview DB for real data).
-2. Apply the exact migrations already tested in Preview using the Production `DIRECT_URL`; verify the schema before taking traffic.
-3. Replace the Production-scoped `DATABASE_URL` in Vercel with the new Production project value. Keep the Preview value unchanged; retain the new Production `DIRECT_URL` only in the authorised deployment owner's local environment for migrations.
-4. Redeploy `main`, run the smoke test, and record the tested commit + rollback target.
+1. In account B create `membership-preview` (same region as `membership-prod`); save its database password in a password manager.
+2. From its **Connect** panel take the transaction-pooler string (`:6543`) for `DATABASE_URL` and the session-pooler string (`:5432`) for `DIRECT_URL`. scaffold uses `sslmode=require`, so no CA-cert variable is needed.
+3. Apply the schema to the empty project: back up `.env.local` (`cp .env.local .env.local.bak`), point its `DIRECT_URL` at `membership-preview`, run `npm run db:migrate:deploy` (then `npm run db:seed` if you want demo data), and restore with `mv .env.local.bak .env.local`.
+4. In Vercel, restrict the existing `DATABASE_URL` to the **Production** scope (value `membership-prod`) and add a second `DATABASE_URL` in the **Preview** scope with the `membership-preview` value.
+5. Redeploy `main`, confirm Production reaches `membership-prod` and a PR Preview reaches `membership-preview`, run the smoke test, and record the tested commit + rollback target.
 
 ## Official references
 
