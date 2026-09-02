@@ -6,6 +6,11 @@ import { prisma } from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { recordAuditLog, type AuditLogClient } from "@/lib/audit-log";
 import { getKnownBenefitCodes } from "@/lib/benefits";
+import {
+  getPartnerSurveyUrl,
+  PARTNER_SURVEY_URL_KEY,
+  setPlatformSetting,
+} from "@/lib/platform-settings";
 
 //
 // Admin-only server actions for editing the benefit catalogue (phase C of the
@@ -313,6 +318,44 @@ export async function updateCatalogueBenefitAction(input: {
         },
       });
     }
+  });
+}
+
+/**
+ * The programme-wide partner satisfaction survey link. A PlatformSetting
+ * rather than a catalogue field, but edited from the catalogue editor and
+ * audited like the benefit actions, so it lives here beside them.
+ * Benefit.surveyUrl overrides it per benefit. An empty submission clears the
+ * link — the row is deleted, since a missing row means "not set" — and the
+ * member-facing button disappears wherever no override exists.
+ */
+export async function savePartnerSurveyUrlAction(input: {
+  url: string;
+}): Promise<void> {
+  const { actorId, actorEmail } = await getActor();
+  const next = normaliseSurveyUrl(input.url);
+
+  await prisma.$transaction(async (tx) => {
+    const previous = await getPartnerSurveyUrl(tx);
+    // No-op saves are not audited, matching the catalogue actions.
+    if (previous === next) return;
+
+    await setPlatformSetting(tx, PARTNER_SURVEY_URL_KEY, next);
+
+    // entityId is the setting key: the row is about that setting, and the
+    // (entityType, entityId) index serves its history the same way.
+    await recordAuditLog(tx, {
+      entityType: "PlatformSetting",
+      entityId: PARTNER_SURVEY_URL_KEY,
+      action: "UPDATE",
+      actorId,
+      data: {
+        actorEmail,
+        changes: {
+          setting: { previous: { value: previous }, next: { value: next } },
+        },
+      },
+    });
   });
 }
 
