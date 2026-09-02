@@ -25,6 +25,7 @@ type BenefitDraft = {
   description: string;
   trigger: string;
   outcome: string;
+  surveyUrl: string;
   termsText: string;
   tierMinId: string;
   supersedesCodes: string[];
@@ -37,6 +38,7 @@ function draftFromBenefit(b: EditorBenefit): BenefitDraft {
     description: b.description,
     trigger: b.trigger ?? "",
     outcome: b.outcome ?? "",
+    surveyUrl: b.surveyUrl ?? "",
     termsText: b.terms.join("\n"),
     tierMinId: String(b.tierMinId),
     supersedesCodes: b.supersedesCodes,
@@ -50,6 +52,7 @@ function emptyDraft(tierOptions: MembershipTierOption[]): BenefitDraft {
     description: "",
     trigger: "",
     outcome: "",
+    surveyUrl: "",
     termsText: "",
     tierMinId: String(tierOptions[0]?.id ?? ""),
     supersedesCodes: [],
@@ -63,6 +66,7 @@ function draftToInput(draft: BenefitDraft): CatalogueBenefitInput {
     description: draft.description,
     trigger: draft.trigger || null,
     outcome: draft.outcome || null,
+    surveyUrl: draft.surveyUrl || null,
     terms: draft.termsText
       .split("\n")
       .map((t) => t.trim())
@@ -166,6 +170,23 @@ function BenefitFields(props: {
         className="auth-input"
         value={draft.outcome}
         onChange={(e) => setDraft({ ...draft, outcome: e.target.value })}
+      />
+
+      <label style={fieldLabelStyle} htmlFor={`${idPrefix}-survey-url`}>
+        Satisfaction survey link override{" "}
+        <span className="small">(optional)</span>
+      </label>
+      <p className="small" style={{ margin: "0 0 .25rem" }}>
+        A full https:// link, offered to members once this benefit is
+        redeemed. Leave blank to use the programme-wide survey link.
+      </p>
+      <input
+        id={`${idPrefix}-survey-url`}
+        className="auth-input"
+        type="url"
+        inputMode="url"
+        value={draft.surveyUrl}
+        onChange={(e) => setDraft({ ...draft, surveyUrl: e.target.value })}
       />
 
       <label style={fieldLabelStyle} htmlFor={`${idPrefix}-terms`}>

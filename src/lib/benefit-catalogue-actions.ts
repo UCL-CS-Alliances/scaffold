@@ -49,6 +49,7 @@ export type CatalogueBenefitInput = {
   tierMinId: number;
   trigger: string | null;
   outcome: string | null;
+  surveyUrl: string | null;
   terms: string[];
   supersedesCodes: string[];
 };
@@ -62,6 +63,7 @@ type BenefitAuditSnapshot = {
   tierMinId: number;
   trigger: string | null;
   outcome: string | null;
+  surveyUrl: string | null;
   terms: string[];
   supersedesCodes: string[];
   isActive: boolean;
@@ -81,6 +83,7 @@ async function getBenefitAuditSnapshot(
       tierMinId: true,
       trigger: true,
       outcome: true,
+      surveyUrl: true,
       terms: true,
       supersedesCodes: true,
       isActive: true,
@@ -99,6 +102,7 @@ const benefitFields = [
   "tierMinId",
   "trigger",
   "outcome",
+  "surveyUrl",
   "terms",
   "supersedesCodes",
   "isActive",
@@ -117,6 +121,31 @@ function diffBenefitSnapshots(
     }
   }
   return Object.keys(next).length ? { benefit: { previous, next } } : {};
+}
+
+// Survey links are any https URL. The SAT team uses Microsoft Forms today,
+// but Microsoft has renamed its Forms domains before, and a host allow-list
+// would turn the next rename into a deploy. Stored as typed (trimmed) rather
+// than re-serialised through URL.toString(), so what the admin pasted is what
+// the member opens. Empty clears the link.
+const SURVEY_URL_MAX_LENGTH = 2048;
+
+function normaliseSurveyUrl(raw: unknown): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+  if (value.length > SURVEY_URL_MAX_LENGTH) {
+    throw new Error("Survey link is too long.");
+  }
+  let parsed: URL | null = null;
+  try {
+    parsed = new URL(value);
+  } catch {
+    parsed = null;
+  }
+  if (!parsed || parsed.protocol !== "https:") {
+    throw new Error("Survey link must be a full https:// address.");
+  }
+  return value;
 }
 
 /**
@@ -178,6 +207,7 @@ async function validateBenefitInput(
     tierMinId,
     trigger: triggerRaw || null,
     outcome: outcomeRaw || null,
+    surveyUrl: normaliseSurveyUrl(input.surveyUrl),
     terms: (input.terms ?? []).map((t) => String(t).trim()).filter(Boolean),
     supersedesCodes,
   };
