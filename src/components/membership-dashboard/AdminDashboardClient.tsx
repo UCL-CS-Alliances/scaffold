@@ -18,12 +18,12 @@ import type {
   AdminSelectedMember,
   MembershipTierOption,
 } from "@/lib/membership-dashboard-admin";
-import type { HandbookRenderResult } from "@/lib/handbook";
 import {
   acknowledgeBenefitRequestAction,
   closeBenefitRequestAction,
   startBenefitRequestAction,
 } from "@/lib/membership-dashboard-actions";
+import { satHandbook } from "@/content/satHandbook";
 import BenefitCatalogueEditor from "./BenefitCatalogueEditor";
 import BenefitPartnerNotes from "./BenefitPartnerNotes";
 import BenefitRedemptionChecklist, {
@@ -256,7 +256,6 @@ export default function AdminDashboardClient(props: {
   partnerOpenRequests: Record<string, OrganisationBenefitRequest>;
   stepProgressCounts: Record<number, number>;
   initialTab?: string | null;
-  handbook: HandbookRenderResult;
 }) {
   const {
     members,
@@ -273,7 +272,6 @@ export default function AdminDashboardClient(props: {
     partnerOpenRequests,
     stepProgressCounts,
     initialTab,
-    handbook,
   } = props;
 
   const router = useRouter();
@@ -281,8 +279,6 @@ export default function AdminDashboardClient(props: {
   // Only the trigger is needed now: per-benefit saves own their pending state
   // inside BenefitRedemptionChecklist.
   const [, startTransition] = useTransition();
-
-  const tocSlug = handbook.chapters[0]?.slug ?? "table-of-contents";
 
   // Local select state fixes "snap back" during RSC refresh
   const [localSelectedUserId, setLocalSelectedUserId] = useState(
@@ -355,11 +351,6 @@ export default function AdminDashboardClient(props: {
     setActiveTab(next);
     const params = new URLSearchParams(sp?.toString());
     params.set("tab", next);
-
-    // If entering handbook and no chapter is set, default to the ToC chapter.
-    if (next === "handbook" && !params.get("chapter")) {
-      params.set("chapter", tocSlug);
-    }
 
     startTransition(() => {
       pushWithParams(params);
@@ -448,15 +439,6 @@ export default function AdminDashboardClient(props: {
     benefitStats.forEach((s) => m.set(s.benefitId, s));
     return m;
   }, [benefitStats]);
-
-  function handbookHref(chapterSlug: string) {
-    const params = new URLSearchParams(sp?.toString());
-    params.set("tab", "handbook");
-    params.set("chapter", chapterSlug);
-    return `/membership-dashboard?${params.toString()}`;
-  }
-
-  const isTocPage = handbook.active.slug === tocSlug;
 
   return (
     <>
@@ -915,130 +897,29 @@ export default function AdminDashboardClient(props: {
             )}
           </div>
 
-          {/* Handbook panel */}
+          {/* Handbook panel. The handbook lives in Confluence, which refuses
+              to be framed (X-Frame-Options: SAMEORIGIN), so this tab links out
+              rather than embedding or copying the content. */}
           <div
             role="tabpanel"
             id="panel-handbook"
             aria-labelledby="tab-handbook"
-            className="tab-panel tab-panel--scroll"
+            className="tab-panel"
             hidden={activeTab !== "handbook"}
           >
-            {/* ToC page = two column layout; chapter pages = pager + content only */}
-            {isTocPage ? (
-              <div className="handbook-grid">
-                <nav className="handbook-toc">
-                  <h4 style={{ marginTop: 0 }}>Contents</h4>
-                  <ol>
-                    {handbook.chapters.map((c, idx) => (
-                      <li key={c.slug}>
-                        {c.slug === handbook.active.slug ? (
-                          <strong aria-current="page">
-                            {idx + 1}. {c.title}
-                          </strong>
-                        ) : (
-                          <Link href={handbookHref(c.slug)}>
-                            {idx + 1}. {c.title}
-                          </Link>
-                        )}
-                      </li>
-                    ))}
-                  </ol>
-                </nav>
-
-                <article className="handbook-content">
-                  <div className="handbook-pager">
-                    <button
-                      className="button-link button-link--secondary"
-                      disabled
-                      aria-disabled="true"
-                    >
-                      Previous
-                    </button>
-
-                    <button
-                      className="button-link button-link--secondary"
-                      disabled
-                      aria-disabled="true"
-                    >
-                      Table of contents
-                    </button>
-
-                    {handbook.next ? (
-                      <Link
-                        className="button-link button-link--secondary"
-                        href={handbookHref(handbook.next.slug)}
-                      >
-                        Next
-                      </Link>
-                    ) : (
-                      <button
-                        className="button-link button-link--secondary"
-                        disabled
-                        aria-disabled="true"
-                      >
-                        Next
-                      </button>
-                    )}
-                  </div>
-
-                  <div
-                    className="markdown-content"
-                    dangerouslySetInnerHTML={{ __html: handbook.html }}
-                  />
-                </article>
-              </div>
-            ) : (
-              <article className="handbook-content">
-                <div className="handbook-pager">
-                  {handbook.prev ? (
-                    <Link
-                      className="button-link button-link--secondary"
-                      href={handbookHref(handbook.prev.slug)}
-                    >
-                      Previous
-                    </Link>
-                  ) : (
-                    <button
-                      className="button-link button-link--secondary"
-                      disabled
-                      aria-disabled="true"
-                    >
-                      Previous
-                    </button>
-                  )}
-
-                  <Link
-                    className="button-link button-link--secondary"
-                    href={handbookHref(tocSlug)}
-                  >
-                    Table of contents
-                  </Link>
-
-                  {handbook.next ? (
-                    <Link
-                      className="button-link button-link--secondary"
-                      href={handbookHref(handbook.next.slug)}
-                    >
-                      Next
-                    </Link>
-                  ) : (
-                    <button
-                      className="button-link button-link--secondary"
-                      disabled
-                      aria-disabled="true"
-                    >
-                      Next
-                    </button>
-                  )}
-                </div>
-
-                {/* No extra title here; Markdown owns the chapter heading */}
-                <div
-                  className="markdown-content"
-                  dangerouslySetInnerHTML={{ __html: handbook.html }}
-                />
-              </article>
-            )}
+            <h3 style={{ marginTop: 0 }}>{satHandbook.title}</h3>
+            <p style={{ maxWidth: "60ch" }}>{satHandbook.description}</p>
+            <p>
+              <a
+                className="button-link button-link--primary"
+                href={satHandbook.url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {satHandbook.ctaLabel}
+              </a>
+            </p>
+            <p className="small">{satHandbook.note}</p>
           </div>
         </div>
       </section>
