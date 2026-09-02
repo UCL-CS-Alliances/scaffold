@@ -6,7 +6,7 @@
 ------------------------------------------------------------ */
 
 :root {
-  color-scheme: light;
+  color-scheme: only light;
 
   /* App base */
   --background: #fafafa;
