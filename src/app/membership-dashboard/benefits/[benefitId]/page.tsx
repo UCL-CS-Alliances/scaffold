@@ -14,6 +14,7 @@ import {
   type OrganisationBenefitRequest,
 } from "@/lib/benefits";
 import prisma from "@/lib/prisma";
+import { getPartnerSurveyUrl } from "@/lib/platform-settings";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { getMemberDashboardData } from "@/lib/membership-dashboard";
 import SecondaryNav from "@/components/membership-dashboard/SecondaryNav";
@@ -156,6 +157,17 @@ export default async function BenefitPage({ params }: PageProps) {
   );
   const { symbol, label } = getStatusMeta(status);
 
+  // The satisfaction survey is offered once the benefit is delivered — on
+  // REDEEMED alone, which by the precedence above includes a benefit redeemed
+  // outside the current tier. The benefit's own link wins over the
+  // programme-wide PlatformSetting, and the default is only read when it is
+  // needed, so the other statuses cost no extra query. No link at either
+  // level means no button: a member is never shown a stub.
+  const surveyUrl =
+    status === "REDEEMED"
+      ? (benefit.surveyUrl ?? (await getPartnerSurveyUrl(prisma)))
+      : null;
+
   // Process, terms and the back link stay on the page throughout the request
   // ladder: has access, not redeemed, not superseded. Gating them on
   // HAS_ACCESS alone would make them vanish the moment a member requests.
@@ -198,6 +210,31 @@ export default async function BenefitPage({ params }: PageProps) {
               If you believe this is incorrect, please contact the Strategic
               Alliances team.
             </p>
+
+            {/* Survey: its own block, gated on status alone — never on the
+                nullable, admin-editable process.outcome text the placeholder
+                used to sit inside, which an admin clearing the outcome would
+                have silently removed. External, so a plain anchor rather
+                than <Link>, in a new tab; nothing is recorded on click. */}
+            {surveyUrl && (
+              <div style={{ marginTop: "1.25rem" }}>
+                <h3>Tell us how it went</h3>
+                <p>
+                  Your feedback helps the Strategic Alliances Team improve
+                  this benefit for every partner. The survey opens in a new
+                  tab.
+                </p>
+                <a
+                  href={surveyUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="button-link button-link--primary"
+                  style={{ marginTop: "0.5rem" }}
+                >
+                  Launch partner satisfaction survey
+                </a>
+              </div>
+            )}
 
             <p style={{ marginTop: "1.25rem" }}>
               <Link
@@ -438,16 +475,6 @@ export default async function BenefitPage({ params }: PageProps) {
                 <section style={{ marginTop: "1.25rem" }}>
                   <h3>Outcome</h3>
                   <p>{process.outcome}</p>
-                  <button
-                    type="button"
-                    className="button-link button-link--primary"
-                    disabled
-                    aria-disabled="true"
-                    title="This action will be enabled in a future release."
-                    style={{ marginTop: "0.5rem" }}
-                  >
-                    Launch partner satisfaction survey
-                  </button>
                 </section>
               )}
             </section>
