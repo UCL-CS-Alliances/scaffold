@@ -27,6 +27,12 @@ import { BENEFITS } from './fixtures/benefits';
 // edits, the standalone entry point refuses to run without --force
 // (`npm run db:seed:benefits -- --force`).
 //
+// One deliberate exception to "the fixture wins": Benefit.surveyUrl, the
+// per-benefit partner satisfaction survey link. It is operational config an
+// admin enters, not catalogue content, and the fixture has no such field —
+// so the seeder neither sets nor clears it, and an override survives a
+// re-baseline.
+//
 
 /**
  * Reconcile a benefit's steps against the fixture **by position**, rather than
@@ -106,6 +112,8 @@ export async function seedBenefits(prisma: PrismaClient) {
       outcome: benefit.process?.outcome ?? null,
       terms: benefit.terms ?? [],
       supersedesCodes: benefit.supersedes ?? [],
+      // surveyUrl is deliberately absent (see the header): the upsert leaves
+      // whatever an admin entered in place.
       sortOrder: index,
       // The re-baseline un-retires: a fixture benefit an admin retired comes
       // back, because the fixture says it exists and is live.

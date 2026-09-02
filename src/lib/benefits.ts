@@ -60,6 +60,11 @@ export type CatalogueBenefit = {
   process: CatalogueBenefitProcess;
   terms: string[];
 
+  /** Per-benefit satisfaction survey link, overriding the programme-wide
+   * PlatformSetting default; null means "use the default". Offered to
+   * members once the benefit is redeemed. */
+  surveyUrl: string | null;
+
   /** Present only on an `includeRetired` read, so the shape existing callers
    * hand to client components is unchanged. False means retired. */
   isActive?: boolean;
@@ -111,6 +116,7 @@ export async function getBenefitCatalogue(
       outcome: row.outcome,
     },
     terms: row.terms,
+    surveyUrl: row.surveyUrl,
   }));
 }
 
@@ -136,6 +142,7 @@ export type EditorBenefit = {
   tierMinRank: number;
   trigger: string | null;
   outcome: string | null;
+  surveyUrl: string | null;
   terms: string[];
   supersedesCodes: string[];
   isActive: boolean;
@@ -175,6 +182,7 @@ export async function getBenefitCatalogueForEditor(
     tierMinRank: row.tierMin.rank,
     trigger: row.trigger,
     outcome: row.outcome,
+    surveyUrl: row.surveyUrl,
     terms: row.terms,
     supersedesCodes: row.supersedesCodes,
     isActive: row.isActive,
