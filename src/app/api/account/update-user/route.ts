@@ -512,7 +512,7 @@ export async function POST(req: Request) {
           });
         }
       }
-    });
+    }, { maxWait: 10000, timeout: 30000 });
 
     const adminDemoted = editingSelf && wasAdmin && !isAdminAfterSave;
 
