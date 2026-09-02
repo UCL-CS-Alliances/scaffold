@@ -3,6 +3,7 @@
 
 import { useId, useState } from "react";
 import { signIn } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
 type SignInFormProps = {
   defaultRedirect: string;
@@ -10,6 +11,7 @@ type SignInFormProps = {
 
 export default function SignInForm({ defaultRedirect }: SignInFormProps) {
   const helpId = useId();
+  const router = useRouter();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -54,6 +56,11 @@ export default function SignInForm({ defaultRedirect }: SignInFormProps) {
       setSubmitting(false);
     }
   }
+
+  const handleForgotPassword = () => {
+      router.push("/reset-password");
+    };
+  
 
   async function handleRegister(e: React.MouseEvent<HTMLButtonElement>) {
     // Keep this in-form, but ensure it never submits the form
@@ -165,8 +172,7 @@ export default function SignInForm({ defaultRedirect }: SignInFormProps) {
           <button
             type="button"
             className="auth-linklike"
-            aria-disabled="true"
-            disabled
+            onClick={handleForgotPassword}
           >
             Forgot password?
           </button>
