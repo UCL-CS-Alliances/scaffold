@@ -233,6 +233,13 @@ model Benefit {
   trigger String?
   outcome String?
 
+  // Per-benefit override of the programme-wide partner satisfaction survey
+  // link (PlatformSetting "partnerSurveyUrl"); null means "use the default".
+  // Shown to members once the benefit is redeemed. Operational config rather
+  // than catalogue content: the seeder's hard re-baseline neither reads nor
+  // writes it, so an admin-entered override survives `db:seed:benefits`.
+  surveyUrl String?
+
   terms String[]
 
   // Codes of the benefits this one replaces, mirroring how redeemedBenefitCodes
@@ -365,6 +372,21 @@ model BenefitRedemptionRequest {
   @@index([status, requestedAt])
   @@index([benefitId])
   @@index([requestedById])
+}
+
+// PLATFORM SETTINGS
+// -----------------
+// Small admin-editable operational values that belong to no partner and to no
+// catalogue entry, one row per key — the programme-wide partner satisfaction
+// survey link is the first. A missing row means "not set". Read and written
+// only through src/lib/platform-settings.ts, which owns the key list. The
+// migration creates the table empty and nothing seeds it: values are entered
+// from the admin dashboard.
+
+model PlatformSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 // AUTH MODELS (NextAuth-style)

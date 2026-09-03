@@ -12,6 +12,7 @@ import {
   reorderBenefitStepsAction,
   restoreCatalogueBenefitAction,
   retireCatalogueBenefitAction,
+  savePartnerSurveyUrlAction,
   updateBenefitStepAction,
   updateCatalogueBenefitAction,
   type CatalogueBenefitInput,
@@ -25,6 +26,7 @@ type BenefitDraft = {
   description: string;
   trigger: string;
   outcome: string;
+  surveyUrl: string;
   termsText: string;
   tierMinId: string;
   supersedesCodes: string[];
@@ -37,6 +39,7 @@ function draftFromBenefit(b: EditorBenefit): BenefitDraft {
     description: b.description,
     trigger: b.trigger ?? "",
     outcome: b.outcome ?? "",
+    surveyUrl: b.surveyUrl ?? "",
     termsText: b.terms.join("\n"),
     tierMinId: String(b.tierMinId),
     supersedesCodes: b.supersedesCodes,
@@ -50,6 +53,7 @@ function emptyDraft(tierOptions: MembershipTierOption[]): BenefitDraft {
     description: "",
     trigger: "",
     outcome: "",
+    surveyUrl: "",
     termsText: "",
     tierMinId: String(tierOptions[0]?.id ?? ""),
     supersedesCodes: [],
@@ -63,6 +67,7 @@ function draftToInput(draft: BenefitDraft): CatalogueBenefitInput {
     description: draft.description,
     trigger: draft.trigger || null,
     outcome: draft.outcome || null,
+    surveyUrl: draft.surveyUrl || null,
     terms: draft.termsText
       .split("\n")
       .map((t) => t.trim())
@@ -168,6 +173,24 @@ function BenefitFields(props: {
         onChange={(e) => setDraft({ ...draft, outcome: e.target.value })}
       />
 
+      <label style={fieldLabelStyle} htmlFor={`${idPrefix}-survey-url`}>
+        Satisfaction survey link override{" "}
+        <span className="small">(optional)</span>
+      </label>
+      <p className="small" style={{ margin: "0 0 .25rem" }}>
+        A full https:// link, offered to members once this benefit is
+        redeemed. Leave blank to use the programme-wide link from the
+        &quot;Partner satisfaction survey&quot; card at the top of this page.
+      </p>
+      <input
+        id={`${idPrefix}-survey-url`}
+        className="auth-input"
+        type="url"
+        inputMode="url"
+        value={draft.surveyUrl}
+        onChange={(e) => setDraft({ ...draft, surveyUrl: e.target.value })}
+      />
+
       <label style={fieldLabelStyle} htmlFor={`${idPrefix}-terms`}>
         Terms <span className="small">(one per line)</span>
       </label>
@@ -209,6 +232,103 @@ function BenefitFields(props: {
         </fieldset>
       )}
     </>
+  );
+}
+
+// The programme-wide satisfaction survey link: a PlatformSetting rather than
+// a catalogue field, edited here because this is already where the SAT team
+// manages what members see about benefits. Each benefit card can override it.
+function PartnerSurveyLinkCard(props: { partnerSurveyUrl: string | null }) {
+  const { partnerSurveyUrl } = props;
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [value, setValue] = useState(partnerSurveyUrl ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [savedMessage, setSavedMessage] = useState<string | null>(null);
+
+  // Server state is the source of truth after every refresh, as with the
+  // benefit drafts: an unsaved edit is reset when the value re-arrives
+  // changed. Adjusted during render (React's "storing information from
+  // previous renders" pattern) rather than in an effect, which the hooks
+  // lint rejects — and rather than keying the card on the value, which
+  // would remount it and collapse the <details> the admin just saved from.
+  const [syncedServerValue, setSyncedServerValue] = useState(partnerSurveyUrl);
+  if (syncedServerValue !== partnerSurveyUrl) {
+    setSyncedServerValue(partnerSurveyUrl);
+    setValue(partnerSurveyUrl ?? "");
+  }
+
+  function save() {
+    startTransition(async () => {
+      try {
+        await savePartnerSurveyUrlAction({ url: value });
+        setError(null);
+        setSavedMessage(
+          value.trim() ? "Survey link saved." : "Survey link cleared.",
+        );
+        router.refresh();
+      } catch (e) {
+        setSavedMessage(null);
+        setError(errorMessage(e));
+      }
+    });
+  }
+
+  return (
+    <details
+      className="tile"
+      style={{ padding: ".75rem", marginBottom: ".75rem" }}
+    >
+      <summary>
+        <strong>Partner satisfaction survey</strong>{" "}
+        {!partnerSurveyUrl && <span className="pill">Not set</span>}
+      </summary>
+
+      <p className="small" style={{ marginTop: ".5rem" }}>
+        Once a benefit has been redeemed, its page offers members a
+        &quot;Launch partner satisfaction survey&quot; button that opens this
+        link in a new tab — a Microsoft Forms link, or any https:// address.
+        A benefit can override it from its own card below. With no link set
+        at either level, the button is not shown.
+      </p>
+
+      <label style={fieldLabelStyle} htmlFor="partner-survey-url">
+        Survey link
+      </label>
+      <input
+        id="partner-survey-url"
+        className="auth-input"
+        type="url"
+        inputMode="url"
+        placeholder="https://forms.office.com/…"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+      />
+
+      <div className="cluster" style={{ marginTop: ".75rem" }}>
+        <button
+          type="button"
+          className="button-link"
+          onClick={save}
+          disabled={isPending}
+          aria-disabled={isPending ? "true" : undefined}
+        >
+          Save survey link
+        </button>
+        {isPending && <span className="small">Saving…</span>}
+      </div>
+
+      {savedMessage && (
+        <p className="small" role="status" style={{ marginTop: ".5rem" }}>
+          {savedMessage}
+        </p>
+      )}
+      {error && (
+        <p className="small" role="alert" style={{ marginTop: ".5rem" }}>
+          {error}
+        </p>
+      )}
+    </details>
   );
 }
 
@@ -559,8 +679,10 @@ export default function BenefitCatalogueEditor(props: {
   benefits: EditorBenefit[];
   tierOptions: MembershipTierOption[];
   stepProgressCounts: Record<number, number>;
+  partnerSurveyUrl: string | null;
 }) {
-  const { benefits, tierOptions, stepProgressCounts } = props;
+  const { benefits, tierOptions, stepProgressCounts, partnerSurveyUrl } =
+    props;
 
   const supersedeOptions = benefits.map((b) => ({
     code: b.code,
@@ -576,6 +698,8 @@ export default function BenefitCatalogueEditor(props: {
         and are <strong>not</strong> updated automatically, so treat them as a
         snapshot until they are reconciled.
       </p>
+
+      <PartnerSurveyLinkCard partnerSurveyUrl={partnerSurveyUrl} />
 
       <CreateBenefitCard
         tierOptions={tierOptions}

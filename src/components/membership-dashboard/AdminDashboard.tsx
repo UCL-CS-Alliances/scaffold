@@ -39,6 +39,7 @@ type AdminDashboardProps = AdminDashboardSummary & {
   partnerProgress: BenefitActionProgressMap;
   partnerOpenRequests: Record<string, OrganisationBenefitRequest>;
   stepProgressCounts: Record<number, number>;
+  partnerSurveyUrl: string | null;
 
   initialTab?: string | null;
   handbook: HandbookRenderResult;
@@ -72,6 +73,7 @@ export default function AdminDashboard({
   partnerProgress,
   partnerOpenRequests,
   stepProgressCounts,
+  partnerSurveyUrl,
   initialTab = null,
   handbook,
 }: AdminDashboardProps) {
@@ -109,6 +111,7 @@ export default function AdminDashboard({
           partnerProgress={partnerProgress}
           partnerOpenRequests={partnerOpenRequests}
           stepProgressCounts={stepProgressCounts}
+          partnerSurveyUrl={partnerSurveyUrl}
           initialTab={initialTab}
           handbook={handbook}
         />

@@ -30,6 +30,7 @@ import {
   getBenefitPartnerNotesForOrganisation,
   getOpenBenefitRequestsForOrganisation,
 } from "@/lib/benefits";
+import { getPartnerSurveyUrl } from "@/lib/platform-settings";
 
 type Props = {
   searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -110,6 +111,7 @@ export default async function MembershipDashboardPage(props: Props) {
       editorBenefits,
       tierOptions,
       openRequestQueue,
+      partnerSurveyUrl,
     ] = await Promise.all([
       getAdminDashboardSummary(),
       getAdminMemberList(),
@@ -125,6 +127,8 @@ export default async function MembershipDashboardPage(props: Props) {
       getMembershipTierOptions(),
       // The cross-partner request queue (benefits tab, ?view=requests).
       getAdminOpenBenefitRequests(),
+      // The programme-wide survey link, for the editor's settings card.
+      getPartnerSurveyUrl(prisma),
     ]);
 
     // Feeds the editor's step-deletion warning: how many partners' progress
@@ -202,6 +206,7 @@ export default async function MembershipDashboardPage(props: Props) {
         partnerProgress={partnerProgress}
         partnerOpenRequests={partnerOpenRequests}
         stepProgressCounts={stepProgressCounts}
+        partnerSurveyUrl={partnerSurveyUrl}
         initialTab={tab}
         handbook={handbook}
       />

@@ -6,6 +6,11 @@ import { prisma } from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { recordAuditLog, type AuditLogClient } from "@/lib/audit-log";
 import { getKnownBenefitCodes } from "@/lib/benefits";
+import {
+  getPartnerSurveyUrl,
+  PARTNER_SURVEY_URL_KEY,
+  setPlatformSetting,
+} from "@/lib/platform-settings";
 
 //
 // Admin-only server actions for editing the benefit catalogue (phase C of the
@@ -49,6 +54,7 @@ export type CatalogueBenefitInput = {
   tierMinId: number;
   trigger: string | null;
   outcome: string | null;
+  surveyUrl: string | null;
   terms: string[];
   supersedesCodes: string[];
 };
@@ -62,6 +68,7 @@ type BenefitAuditSnapshot = {
   tierMinId: number;
   trigger: string | null;
   outcome: string | null;
+  surveyUrl: string | null;
   terms: string[];
   supersedesCodes: string[];
   isActive: boolean;
@@ -81,6 +88,7 @@ async function getBenefitAuditSnapshot(
       tierMinId: true,
       trigger: true,
       outcome: true,
+      surveyUrl: true,
       terms: true,
       supersedesCodes: true,
       isActive: true,
@@ -99,6 +107,7 @@ const benefitFields = [
   "tierMinId",
   "trigger",
   "outcome",
+  "surveyUrl",
   "terms",
   "supersedesCodes",
   "isActive",
@@ -117,6 +126,31 @@ function diffBenefitSnapshots(
     }
   }
   return Object.keys(next).length ? { benefit: { previous, next } } : {};
+}
+
+// Survey links are any https URL. The SAT team uses Microsoft Forms today,
+// but Microsoft has renamed its Forms domains before, and a host allow-list
+// would turn the next rename into a deploy. Stored as typed (trimmed) rather
+// than re-serialised through URL.toString(), so what the admin pasted is what
+// the member opens. Empty clears the link.
+const SURVEY_URL_MAX_LENGTH = 2048;
+
+function normaliseSurveyUrl(raw: unknown): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+  if (value.length > SURVEY_URL_MAX_LENGTH) {
+    throw new Error("Survey link is too long.");
+  }
+  let parsed: URL | null = null;
+  try {
+    parsed = new URL(value);
+  } catch {
+    parsed = null;
+  }
+  if (!parsed || parsed.protocol !== "https:") {
+    throw new Error("Survey link must be a full https:// address.");
+  }
+  return value;
 }
 
 /**
@@ -178,6 +212,7 @@ async function validateBenefitInput(
     tierMinId,
     trigger: triggerRaw || null,
     outcome: outcomeRaw || null,
+    surveyUrl: normaliseSurveyUrl(input.surveyUrl),
     terms: (input.terms ?? []).map((t) => String(t).trim()).filter(Boolean),
     supersedesCodes,
   };
@@ -283,6 +318,44 @@ export async function updateCatalogueBenefitAction(input: {
         },
       });
     }
+  });
+}
+
+/**
+ * The programme-wide partner satisfaction survey link. A PlatformSetting
+ * rather than a catalogue field, but edited from the catalogue editor and
+ * audited like the benefit actions, so it lives here beside them.
+ * Benefit.surveyUrl overrides it per benefit. An empty submission clears the
+ * link — the row is deleted, since a missing row means "not set" — and the
+ * member-facing button disappears wherever no override exists.
+ */
+export async function savePartnerSurveyUrlAction(input: {
+  url: string;
+}): Promise<void> {
+  const { actorId, actorEmail } = await getActor();
+  const next = normaliseSurveyUrl(input.url);
+
+  await prisma.$transaction(async (tx) => {
+    const previous = await getPartnerSurveyUrl(tx);
+    // No-op saves are not audited, matching the catalogue actions.
+    if (previous === next) return;
+
+    await setPlatformSetting(tx, PARTNER_SURVEY_URL_KEY, next);
+
+    // entityId is the setting key: the row is about that setting, and the
+    // (entityType, entityId) index serves its history the same way.
+    await recordAuditLog(tx, {
+      entityType: "PlatformSetting",
+      entityId: PARTNER_SURVEY_URL_KEY,
+      action: "UPDATE",
+      actorId,
+      data: {
+        actorEmail,
+        changes: {
+          setting: { previous: { value: previous }, next: { value: next } },
+        },
+      },
+    });
   });
 }
 

@@ -255,6 +255,7 @@ export default function AdminDashboardClient(props: {
   partnerProgress: BenefitActionProgressMap;
   partnerOpenRequests: Record<string, OrganisationBenefitRequest>;
   stepProgressCounts: Record<number, number>;
+  partnerSurveyUrl: string | null;
   initialTab?: string | null;
   handbook: HandbookRenderResult;
 }) {
@@ -272,6 +273,7 @@ export default function AdminDashboardClient(props: {
     partnerProgress,
     partnerOpenRequests,
     stepProgressCounts,
+    partnerSurveyUrl,
     initialTab,
     handbook,
   } = props;
@@ -697,6 +699,7 @@ export default function AdminDashboardClient(props: {
                     benefits={editorBenefits}
                     tierOptions={tierOptions}
                     stepProgressCounts={stepProgressCounts}
+                    partnerSurveyUrl={partnerSurveyUrl}
                   />
                 ) : benefitsView === "requests" ? (
                   openRequestQueue.length === 0 ? (
