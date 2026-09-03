@@ -2,7 +2,7 @@
 "use client";
 
 import { ReactNode, useMemo } from "react";
-import { ThemeProvider, CssBaseline, createTheme } from "@mui/material";
+import { ThemeProvider, createTheme } from "@mui/material";
 
 type Props = {
   children: ReactNode;
@@ -43,45 +43,12 @@ export default function MuiThemeProvider({ children }: Props) {
         shape: {
           borderRadius: 12,
         },
-        components: {
-          MuiCssBaseline: {
-            styleOverrides: {
-              html: {
-                colorScheme: "light",
-                scrollBehavior: "smooth",
-              },
-              body: {
-                backgroundColor: "var(--bg)",
-                color: "var(--ucl-ink-2)",
-                fontFamily: '"Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif',
-                lineHeight: 1.5,
-                letterSpacing: "-0.01em",
-                margin: 0,
-              },
-              a: {
-                color: "var(--link)",
-                textDecoration: "none",
-              },
-              "a:hover, a:focus": {
-                textDecoration: "underline",
-              },
-              img: {
-                maxWidth: "100%",
-                height: "auto",
-              },
-            },
-          },
-        },
       }),
     [],
   );
 
   return (
     <ThemeProvider theme={theme}>
-      {/* Inject global MUI baseline styles */}
-      <CssBaseline />
-
-      {/* Your own layout wrapper */}
       <div className="page-wrapper">
         {children}
       </div>

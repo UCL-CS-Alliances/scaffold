@@ -60,6 +60,7 @@ export default function UserProfileForm(props: {
   // Admin deleted someone else: the owner of the selection re-points it and
   // refreshes the server data, since this form cannot do either itself.
   onUserDeleted?: () => void;
+  onOrganisationDeleted?: () => void;
 }) {
   const {
     mode,
@@ -70,6 +71,7 @@ export default function UserProfileForm(props: {
     initialSelf,
     initialTempPassword,
     onUserDeleted,
+    onOrganisationDeleted,
   } = props;
 
   const router = useRouter();
@@ -127,6 +129,8 @@ export default function UserProfileForm(props: {
   const [orgModalOpen, setOrgModalOpen] = useState(false);
   const [orgModalName, setOrgModalName] = useState("");
   const [orgModalType, setOrgModalType] = useState<PendingOrg["type"]>("INDUSTRY");
+  const [orgDeleteOpen, setOrgDeleteOpen] = useState(false);
+  const [orgDeleteBusy, setOrgDeleteBusy] = useState(false);
 
   const [roleModalOpen, setRoleModalOpen] = useState(false);
   const [roleModalLabel, setRoleModalLabel] = useState("");
@@ -393,6 +397,39 @@ export default function UserProfileForm(props: {
     setPendingRoles((prev) => [...prev, role]);
     setRoleChoices((prev) => [...prev, { kind: "pending", clientId }]);
     setRoleModalOpen(false);
+  }
+
+  async function deleteOrganisation() {
+    if (organisationChoice?.kind !== "existing") return;
+
+    setOrgDeleteBusy(true);
+    setMessage(null);
+
+    try {
+      const r = await fetch("/api/admin/organisations/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organisationId: organisationChoice.id }),
+      });
+      const data = await r.json();
+
+      if (!r.ok || !data.ok) {
+        setMessage(data.error ?? "Could not delete organisation.");
+        return;
+      }
+
+      setOrgDeleteOpen(false);
+      setOrganisationChoice(null);
+      setLoadedOrganisationId(null);
+      setMessage(
+        `Organisation deleted. ${Number(data.unassignedUserCount ?? 0)} users are now unassigned.`,
+      );
+      onOrganisationDeleted?.();
+    } catch {
+      setMessage("Could not delete organisation.");
+    } finally {
+      setOrgDeleteBusy(false);
+    }
   }
 
   async function changePassword() {
@@ -687,6 +724,7 @@ export default function UserProfileForm(props: {
                     <select
                       id="org"
                       className="auth-input"
+                      disabled={orgDeleteBusy}
                       value={
                         organisationChoice
                           ? organisationChoice.kind === "existing"
@@ -704,8 +742,21 @@ export default function UserProfileForm(props: {
                       ))}
                     </select>
 
-                    <button type="button" className="button-link" onClick={openAddOrg}>
+                    <button
+                      type="button"
+                      className="button-link"
+                      onClick={openAddOrg}
+                      disabled={orgDeleteBusy}
+                    >
                       Add
+                    </button>
+                    <button
+                      type="button"
+                      className="button-link button-link--secondary"
+                      onClick={() => setOrgDeleteOpen(true)}
+                      disabled={organisationChoice?.kind !== "existing" || orgDeleteBusy}
+                    >
+                      Delete organisation
                     </button>
                   </div>
                 </div>
@@ -907,7 +958,7 @@ export default function UserProfileForm(props: {
             type="button"
             className="button-link button-link--primary"
             onClick={() => void save()}
-            disabled={saving}
+            disabled={saving || orgDeleteBusy}
           >
             {saving ? "Saving…" : "Save changes"}
           </button>
@@ -1199,6 +1250,41 @@ export default function UserProfileForm(props: {
       </Modal>
 
       {/* Add organisation modal */}
+      <Modal
+        title="Delete organisation"
+        description="This action cannot be undone."
+        isOpen={orgDeleteOpen}
+        onClose={() => setOrgDeleteOpen(false)}
+        initialFocusSelector='button[data-autofocus="true"]'
+      >
+        <p>
+          Deleting{" "}
+          <strong>
+            {organisationChoice?.kind === "existing"
+              ? meta?.organisations.find((o) => o.id === organisationChoice.id)?.name ??
+                "this organisation"
+              : "this organisation"}
+          </strong>{" "}
+          will leave its users in place but assign them to no organisation. Their primary-contact
+          status will also be cleared.
+        </p>
+
+        <div className="auth-actions" style={{ marginTop: "0.75rem" }}>
+          <button type="button" className="button-link" onClick={() => setOrgDeleteOpen(false)}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="button-link button-link--secondary"
+            data-autofocus="true"
+            onClick={() => void deleteOrganisation()}
+            disabled={orgDeleteBusy}
+          >
+            {orgDeleteBusy ? "Deleting…" : "Confirm delete"}
+          </button>
+        </div>
+      </Modal>
+
       <Modal
         title="Add organisation"
         description="Create a new organisation and select it."
