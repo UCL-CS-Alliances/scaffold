@@ -36,9 +36,6 @@
     "nodemailer": "^7.0.13",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "remark": "^15.0.1",
-    "remark-gfm": "^4.0.1",
-    "remark-html": "^16.0.1",
     "yaml": "2.9.0"
   },
   "devDependencies": {

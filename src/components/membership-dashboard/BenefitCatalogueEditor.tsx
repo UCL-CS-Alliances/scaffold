@@ -694,9 +694,9 @@ export default function BenefitCatalogueEditor(props: {
     <>
       <p className="small" style={{ marginTop: ".25rem" }}>
         Changes here are live for members immediately — no deploy. This
-        catalogue is the authoritative copy; the Handbook chapters restate it
-        and are <strong>not</strong> updated automatically, so treat them as a
-        snapshot until they are reconciled.
+        catalogue is the authoritative copy of the benefit list; the SAT
+        handbook (Handbook tab) is maintained separately in Confluence and is{" "}
+        <strong>not</strong> updated automatically.
       </p>
 
       <PartnerSurveyLinkCard partnerSurveyUrl={partnerSurveyUrl} />

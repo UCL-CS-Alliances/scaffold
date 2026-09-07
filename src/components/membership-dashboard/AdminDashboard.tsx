@@ -9,7 +9,6 @@ import type {
   AdminSelectedMember,
   MembershipTierOption,
 } from "@/lib/membership-dashboard-admin";
-import type { HandbookRenderResult } from "@/lib/handbook";
 import type {
   BenefitActionProgressMap,
   CatalogueBenefit,
@@ -42,7 +41,6 @@ type AdminDashboardProps = AdminDashboardSummary & {
   partnerSurveyUrl: string | null;
 
   initialTab?: string | null;
-  handbook: HandbookRenderResult;
 };
 
 function gbp(n: number) {
@@ -75,7 +73,6 @@ export default function AdminDashboard({
   stepProgressCounts,
   partnerSurveyUrl,
   initialTab = null,
-  handbook,
 }: AdminDashboardProps) {
   return (
     <section className="content-section">
@@ -113,7 +110,6 @@ export default function AdminDashboard({
           stepProgressCounts={stepProgressCounts}
           partnerSurveyUrl={partnerSurveyUrl}
           initialTab={initialTab}
-          handbook={handbook}
         />
       </div>
     </section>

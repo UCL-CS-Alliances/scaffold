@@ -15,7 +15,6 @@ import {
   getAdminSelectedMember,
   getMembershipTierOptions,
 } from "@/lib/membership-dashboard-admin";
-import { renderHandbookChapterBySlug } from "@/lib/handbook";
 import AdminDashboard from "@/components/membership-dashboard/AdminDashboard";
 import MemberDashboard from "@/components/membership-dashboard/MemberDashboard";
 import SignInForm from "@/components/SignInForm";
@@ -95,7 +94,6 @@ export default async function MembershipDashboardPage(props: Props) {
   if (isAdmin) {
     const selectedUserId = pickFirst(sp?.userId) ?? null;
     const tab = pickFirst(sp?.tab) ?? null; // "members" | "benefits" | "handbook"
-    const chapter = pickFirst(sp?.chapter) ?? null;
 
     // Resolved before the batch because the redemption stats are computed from
     // it; the client component receives the same list.
@@ -106,7 +104,6 @@ export default async function MembershipDashboardPage(props: Props) {
       members,
       selectedMember,
       benefitStats,
-      handbook,
       totalUsers,
       editorBenefits,
       tierOptions,
@@ -119,7 +116,6 @@ export default async function MembershipDashboardPage(props: Props) {
         ? getAdminSelectedMember(selectedUserId)
         : Promise.resolve(null),
       getAdminBenefitRedemptionStats(benefits),
-      renderHandbookChapterBySlug(chapter ?? undefined),
       prisma.user.count(),
       // The editor's own shape: retired benefits included, database ids and
       // step rows surfaced. Member-facing consumers keep the list above.
@@ -208,7 +204,6 @@ export default async function MembershipDashboardPage(props: Props) {
         stepProgressCounts={stepProgressCounts}
         partnerSurveyUrl={partnerSurveyUrl}
         initialTab={tab}
-        handbook={handbook}
       />
     );
   }
