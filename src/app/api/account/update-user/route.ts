@@ -234,6 +234,7 @@ export async function POST(req: Request) {
       // 1) Create pending orgs/roles (if any) and build maps
       const pendingOrgIdByClientId = new Map<string, number>();
       const pendingRoleKeyByClientId = new Map<string, string>();
+      const pendingOrganisationNames = new Set<string>();
 
       if (isAdmin && admin?.pending?.organisations?.length) {
         for (const o of admin.pending.organisations) {
@@ -245,6 +246,20 @@ export async function POST(req: Request) {
           if (!type) {
             throw new Error("Organisation type is invalid.");
           }
+
+          const normalizedName = name.toLocaleLowerCase();
+          if (pendingOrganisationNames.has(normalizedName)) {
+            throw new Error(`Organisation "${name}" already exists in this save.`);
+          }
+
+          const existingOrganisation = await tx.organisation.findFirst({
+            where: { name: { equals: name, mode: "insensitive" } },
+            select: { id: true },
+          });
+          if (existingOrganisation) {
+            throw new Error(`Organisation "${name}" already exists.`);
+          }
+          pendingOrganisationNames.add(normalizedName);
 
           const slug = await uniqueOrganisationSlug(name, tx);
           const created = await tx.organisation.create({

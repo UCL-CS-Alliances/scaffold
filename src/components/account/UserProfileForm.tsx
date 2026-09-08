@@ -49,6 +49,10 @@ function labelToRoleKey(label: string) {
   return underscored;
 }
 
+function normaliseOrganisationName(name: string) {
+  return name.trim().toLocaleLowerCase();
+}
+
 export default function UserProfileForm(props: {
   mode: Mode;
   meId: string;
@@ -61,6 +65,7 @@ export default function UserProfileForm(props: {
   // refreshes the server data, since this form cannot do either itself.
   onUserDeleted?: () => void;
   onOrganisationDeleted?: () => void;
+  onRoleDeleted?: () => void;
 }) {
   const {
     mode,
@@ -72,6 +77,7 @@ export default function UserProfileForm(props: {
     initialTempPassword,
     onUserDeleted,
     onOrganisationDeleted,
+    onRoleDeleted,
   } = props;
 
   const router = useRouter();
@@ -134,6 +140,8 @@ export default function UserProfileForm(props: {
 
   const [roleModalOpen, setRoleModalOpen] = useState(false);
   const [roleModalLabel, setRoleModalLabel] = useState("");
+  const [roleDeleteKey, setRoleDeleteKey] = useState<string | null>(null);
+  const [roleDeleteBusy, setRoleDeleteBusy] = useState(false);
 
   // Danger zone state
   const [pwCurrent, setPwCurrent] = useState("");
@@ -164,11 +172,11 @@ export default function UserProfileForm(props: {
     const db = meta?.roles ?? [];
     const pending = pendingRoles.map((r) => ({
       key: `pending:${r.clientId}`,
-      label: `${r.label} (${r.key}) (new)`,
+      label: `${r.label} (new)`,
     }));
     const dbMapped = db.map((r) => ({
       key: `existing:${r.key}`,
-      label: `${r.label} (${r.key})`,
+      label: r.label,
     }));
     return [...dbMapped, ...pending];
   }, [meta, pendingRoles]);
@@ -362,6 +370,18 @@ export default function UserProfileForm(props: {
     const name = orgModalName.trim();
     if (!name) return;
 
+    const normalizedName = normaliseOrganisationName(name);
+    const existsInDb = (meta?.organisations ?? []).some(
+      (organisation) => normaliseOrganisationName(organisation.name) === normalizedName,
+    );
+    const existsPending = pendingOrgs.some(
+      (organisation) => normaliseOrganisationName(organisation.name) === normalizedName,
+    );
+    if (existsInDb || existsPending) {
+      setMessage(`Organisation "${name}" already exists.`);
+      return;
+    }
+
     const clientId = makeClientId("org");
     const org: PendingOrg = { clientId, name, type: orgModalType };
 
@@ -429,6 +449,41 @@ export default function UserProfileForm(props: {
       setMessage("Could not delete organisation.");
     } finally {
       setOrgDeleteBusy(false);
+    }
+  }
+
+  async function deleteRole() {
+    if (!roleDeleteKey) return;
+
+    const roleKey = roleDeleteKey;
+    setRoleDeleteBusy(true);
+    setMessage(null);
+
+    try {
+      const r = await fetch("/api/admin/roles/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roleKey }),
+      });
+      const data = await r.json();
+
+      if (!r.ok || !data.ok) {
+        setMessage(data.error ?? "Could not delete role.");
+        return;
+      }
+
+      setRoleDeleteKey(null);
+      setRoleChoices((prev) =>
+        prev.filter((choice) => choice.kind !== "existing" || choice.key !== roleKey),
+      );
+      setMessage(
+        `Role deleted. ${Number(data.unassignedUserCount ?? 0)} users no longer have this role.`,
+      );
+      onRoleDeleted?.();
+    } catch {
+      setMessage("Could not delete role.");
+    } finally {
+      setRoleDeleteBusy(false);
     }
   }
 
@@ -792,14 +847,19 @@ export default function UserProfileForm(props: {
                 <div className="auth-field">
                   <div className="cluster" style={{ justifyContent: "space-between" }}>
                     <span className="auth-label">Roles</span>
-                    <button type="button" className="button-link" onClick={openAddRole}>
+                    <button
+                      type="button"
+                      className="button-link"
+                      onClick={openAddRole}
+                      disabled={roleDeleteBusy}
+                    >
                       Add role
                     </button>
                   </div>
 
                   <div className="tile" style={{ padding: "0.75rem" }}>
                     {roleOptions.map((r) => (
-                      <label
+                      <div
                         key={r.key}
                         style={{
                           display: "flex",
@@ -808,13 +868,26 @@ export default function UserProfileForm(props: {
                           padding: "0.25rem 0",
                         }}
                       >
-                        <input
-                          type="checkbox"
-                          checked={roleChecked(r.key)}
-                          onChange={() => toggleRole(r.key)}
-                        />
-                        <span>{r.label}</span>
-                      </label>
+                        <label style={{ display: "flex", gap: "0.5rem", alignItems: "center", flex: 1 }}>
+                          <input
+                            type="checkbox"
+                            checked={roleChecked(r.key)}
+                            onChange={() => toggleRole(r.key)}
+                            disabled={roleDeleteBusy}
+                          />
+                          <span>{r.label}</span>
+                        </label>
+                        {r.key.startsWith("existing:") && (
+                          <button
+                            type="button"
+                            className="button-link button-link--secondary"
+                            onClick={() => setRoleDeleteKey(r.key.replace("existing:", ""))}
+                            disabled={roleDeleteBusy}
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -958,7 +1031,7 @@ export default function UserProfileForm(props: {
             type="button"
             className="button-link button-link--primary"
             onClick={() => void save()}
-            disabled={saving || orgDeleteBusy}
+            disabled={saving || orgDeleteBusy || roleDeleteBusy}
           >
             {saving ? "Saving…" : "Save changes"}
           </button>
@@ -1245,6 +1318,35 @@ export default function UserProfileForm(props: {
             disabled={deleteBusy}
           >
             {deleteBusy ? "Working…" : "Confirm delete"}
+          </button>
+        </div>
+      </Modal>
+
+      {/* Delete role confirmation modal */}
+      <Modal
+        title="Delete role"
+        description="This action cannot be undone."
+        isOpen={roleDeleteKey !== null}
+        onClose={() => setRoleDeleteKey(null)}
+        initialFocusSelector='button[data-autofocus="true"]'
+      >
+        <p>
+          Delete the <strong>{meta?.roles.find((role) => role.key === roleDeleteKey)?.label ?? roleDeleteKey}</strong>
+          {" "}role? Users assigned to it will keep their accounts but will no longer have this role.
+        </p>
+
+        <div className="auth-actions" style={{ marginTop: "0.75rem" }}>
+          <button type="button" className="button-link" onClick={() => setRoleDeleteKey(null)}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="button-link button-link--secondary"
+            data-autofocus="true"
+            onClick={() => void deleteRole()}
+            disabled={roleDeleteBusy}
+          >
+            {roleDeleteBusy ? "Deleting…" : "Confirm delete"}
           </button>
         </div>
       </Modal>
