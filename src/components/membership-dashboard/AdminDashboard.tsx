@@ -5,9 +5,16 @@ import type {
   AdminBenefitAuditEntry,
   AdminBenefitRedemptionStat,
   AdminMemberListItem,
+  AdminOpenBenefitRequest,
   AdminSelectedMember,
+  MembershipTierOption,
 } from "@/lib/membership-dashboard-admin";
-import type { HandbookRenderResult } from "@/lib/handbook";
+import type {
+  BenefitActionProgressMap,
+  CatalogueBenefit,
+  EditorBenefit,
+  OrganisationBenefitRequest,
+} from "@/lib/benefits";
 
 type AdminDashboardProps = AdminDashboardSummary & {
   title?: string;
@@ -21,11 +28,19 @@ type AdminDashboardProps = AdminDashboardSummary & {
   selectedUserId?: string | null;
   selectedMember: AdminSelectedMember | null;
 
+  benefits: CatalogueBenefit[];
+  editorBenefits: EditorBenefit[];
+  tierOptions: MembershipTierOption[];
   benefitStats: AdminBenefitRedemptionStat[];
+  openRequestQueue: AdminOpenBenefitRequest[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
+  partnerNotes: Record<string, string>;
+  partnerProgress: BenefitActionProgressMap;
+  partnerOpenRequests: Record<string, OrganisationBenefitRequest>;
+  stepProgressCounts: Record<number, number>;
+  partnerSurveyUrl: string | null;
 
   initialTab?: string | null;
-  handbook: HandbookRenderResult;
 };
 
 function gbp(n: number) {
@@ -46,10 +61,18 @@ export default function AdminDashboard({
   members,
   selectedUserId = null,
   selectedMember,
+  benefits,
+  editorBenefits,
+  tierOptions,
   benefitStats,
+  openRequestQueue,
   benefitAuditTrail,
+  partnerNotes,
+  partnerProgress,
+  partnerOpenRequests,
+  stepProgressCounts,
+  partnerSurveyUrl,
   initialTab = null,
-  handbook,
 }: AdminDashboardProps) {
   return (
     <section className="content-section">
@@ -75,10 +98,18 @@ export default function AdminDashboard({
           members={members}
           selectedUserId={selectedUserId}
           selectedMember={selectedMember}
+          benefits={benefits}
+          editorBenefits={editorBenefits}
+          tierOptions={tierOptions}
           benefitStats={benefitStats}
+          openRequestQueue={openRequestQueue}
           benefitAuditTrail={benefitAuditTrail}
+          partnerNotes={partnerNotes}
+          partnerProgress={partnerProgress}
+          partnerOpenRequests={partnerOpenRequests}
+          stepProgressCounts={stepProgressCounts}
+          partnerSurveyUrl={partnerSurveyUrl}
           initialTab={initialTab}
-          handbook={handbook}
         />
       </div>
     </section>

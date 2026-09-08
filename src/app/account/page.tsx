@@ -78,11 +78,22 @@ export default async function AccountPage(props: AccountPageProps) {
             select: { id: true, key: true, label: true, rank: true },
             orderBy: { rank: "asc" },
           }),
-        ]).then(([organisations, roles, tiers]) => ({
+          // Candidates for the client experience manager dropdown: CEMs are
+          // assigned from the platform's admins.
+          prisma.user.findMany({
+            where: { roles: { some: { role: { key: "ADMIN" } } } },
+            select: { id: true, firstName: true, lastName: true },
+            orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+          }),
+        ]).then(([organisations, roles, tiers, adminUsers]) => ({
           organisations,
           roles,
           tiers,
           apps,
+          admins: adminUsers.map((a) => ({
+            id: a.id,
+            name: `${a.firstName} ${a.lastName}`,
+          })),
         })),
       ])
     : [null, null];

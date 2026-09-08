@@ -40,12 +40,23 @@ model User {
 
   // No memberships relation: a user's membership is their organisation's.
 
+  // Memberships this admin manages as client experience manager.
+  managedMemberships Membership[] @relation("MembershipClientExperienceManager")
+
   // Auth models
   accounts Account[]
   sessions Session[]
 
   // Audit log relation (actor)
   auditLogs AuditLog[] @relation("AuditActor")
+
+  // Progress rows this admin ticked; SET NULL on deletion, like auditLogs.
+  benefitActionProgress BenefitActionProgress[]
+
+  // Benefit requests this contact raised or acknowledged; SET NULL likewise —
+  // a request is the organisation's and outlives any one contact.
+  benefitRequestsRaised       BenefitRedemptionRequest[] @relation("BenefitRequestRequestedBy")
+  benefitRequestsAcknowledged BenefitRedemptionRequest[] @relation("BenefitRequestAcknowledgedBy")
 
   @@index([organisationId])
 }
@@ -62,6 +73,16 @@ model Organisation {
   // organisation's — a free workshop is consumed once, not once per contact.
   membership      Membership?
   dashboardMember MembershipDashboardMember?
+
+  // Admin-written notes about a specific benefit for this partner. The note is
+  // the organisation's for the same reason its membership is.
+  benefitNotes BenefitPartnerNote[]
+
+  // Per-step benefit progress, organisation-scoped like everything above.
+  benefitActionProgress BenefitActionProgress[]
+
+  // Member-raised redemption requests, organisation-scoped like redemption.
+  benefitRequests BenefitRedemptionRequest[]
 }
 
 enum OrganisationType {
@@ -100,6 +121,7 @@ model MembershipTier {
 
   memberships    Membership[]
   appAccessRules AppAccessRule[]
+  benefits       Benefit[]
 }
 
 model Membership {
@@ -114,12 +136,18 @@ model Membership {
   isActive Boolean @default(true)
 
   // Mirrors YAML fields
-  status      String    @default("active")
-  managerName String?
-  expiry      DateTime?
+  status String    @default("active")
+  expiry DateTime?
+
+  // The client experience manager, assigned from the platform's ADMIN users.
+  // SET NULL so the membership survives its manager's account deletion, the
+  // same way AuditLog.actorId does.
+  clientExperienceManager   User?   @relation("MembershipClientExperienceManager", fields: [clientExperienceManagerId], references: [id], onDelete: SetNull)
+  clientExperienceManagerId String?
 
   // No @@index([organisationId]) — the unique index above already covers it.
   @@index([membershipTierId])
+  @@index([clientExperienceManagerId])
 }
 
 // APP REGISTRY & ACCESS RULES
@@ -176,6 +204,189 @@ model MembershipDashboardMember {
 
   // App-specific fields only
   redeemedBenefitCodes String[] // ["B03", "B08", ...]
+}
+
+// BENEFIT CATALOGUE
+// -----------------
+// The catalogue was content-as-code. It lives here so the Strategic Alliances
+// Team can edit it without a deploy, and so notes and per-action progress can
+// hang off a benefit. Its starting set is the seed fixture in
+// prisma/fixtures/benefits.ts.
+
+model Benefit {
+  id   Int    @id @default(autoincrement())
+  code String @unique // "B01" — stable identity; redeemedBenefitCodes stores these
+
+  label       String
+  description String
+  category    String
+
+  // A relation rather than a string: tiers are DB-driven and carry the rank
+  // the access check compares against, so a resolved rank can be handed to
+  // client components without the content-side MEMBERSHIP_TIER_RANK lookup.
+  tierMin   MembershipTier @relation(fields: [tierMinId], references: [id])
+  tierMinId Int
+
+  // The scalar halves of the old content-side `process` object. Its ordered
+  // steps live in BenefitAction so a per-partner tracker can reference a
+  // stable id rather than an array position.
+  trigger String?
+  outcome String?
+
+  // Per-benefit override of the programme-wide partner satisfaction survey
+  // link (PlatformSetting "partnerSurveyUrl"); null means "use the default".
+  // Shown to members once the benefit is redeemed. Operational config rather
+  // than catalogue content: the seeder's hard re-baseline neither reads nor
+  // writes it, so an admin-entered override survives `db:seed:benefits`.
+  surveyUrl String?
+
+  terms String[]
+
+  // Codes of the benefits this one replaces, mirroring how redeemedBenefitCodes
+  // stores bare codes. Validated when the catalogue is edited, not by the
+  // database.
+  supersedesCodes String[]
+
+  // Retire rather than delete: redeemedBenefitCodes holds bare codes with no
+  // foreign key, so a deleted benefit would dangle in redemption history.
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  actions BenefitAction[]
+  notes   BenefitPartnerNote[]
+
+  // Restrict, not Cascade: an open request must not silently vanish with a
+  // benefit — retire the benefit instead, which is the rule anyway.
+  benefitRequests BenefitRedemptionRequest[]
+
+  @@index([tierMinId])
+}
+
+model BenefitAction {
+  id        Int     @id @default(autoincrement())
+  benefit   Benefit @relation(fields: [benefitId], references: [id], onDelete: Cascade)
+  benefitId Int
+
+  // Deliberately *not* @@unique([benefitId, position]): reordering steps under
+  // a unique constraint needs placeholder values. Ordered on read instead.
+  position Int
+  body     String
+
+  progress BenefitActionProgress[]
+
+  @@index([benefitId, position])
+}
+
+// A partner's progress through a benefit's process: one row per completed
+// step, admin-ticked and member-read. Progress belongs to the organisation,
+// like membership, redemption and notes — and hangs off BenefitAction.id,
+// which is why the catalogue editor reorders steps in place: deleting a step
+// is the only operation meant to cascade progress away. Deliberately does NOT
+// touch redemption state; only saveRedeemedBenefitsAction writes that.
+model BenefitActionProgress {
+  id Int @id @default(autoincrement())
+
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  organisationId Int
+
+  benefitAction   BenefitAction @relation(fields: [benefitActionId], references: [id], onDelete: Cascade)
+  benefitActionId Int
+
+  // A nullable timestamp rather than a boolean: "when" costs nothing extra
+  // and answers questions a boolean cannot. Untick deletes the row, so null
+  // is unreachable today — headroom, not a state the code writes.
+  completedAt DateTime?
+
+  // Mirrors AuditLog.actorId: deleting an admin must not delete a partner's
+  // recorded progress.
+  completedBy   User?   @relation(fields: [completedById], references: [id], onDelete: SetNull)
+  completedById String?
+
+  @@unique([organisationId, benefitActionId])
+  @@index([organisationId])
+}
+
+model BenefitPartnerNote {
+  id Int @id @default(autoincrement())
+
+  benefit   Benefit @relation(fields: [benefitId], references: [id], onDelete: Cascade)
+  benefitId Int
+
+  // The note belongs to the partner organisation, not to one contact — the
+  // same rule as membership and benefit redemption.
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  organisationId Int
+
+  body String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One editable note per partner per benefit, overwritten in place.
+  @@unique([benefitId, organisationId])
+  @@index([organisationId])
+}
+
+enum BenefitRequestStatus {
+  REQUESTED
+  ACKNOWLEDGED
+  IN_PROGRESS
+  CLOSED
+}
+
+model BenefitRedemptionRequest {
+  id Int @id @default(autoincrement())
+
+  // The request belongs to the partner organisation, like membership,
+  // redemption, notes and progress: a benefit is consumed once per partner,
+  // so a colleague's open request is the same request.
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  organisationId Int
+
+  // A real FK, not a bare code: benefits are retired, never deleted, so this
+  // still resolves for a benefit withdrawn after the request was raised.
+  benefit   Benefit @relation(fields: [benefitId], references: [id], onDelete: Restrict)
+  benefitId Int
+
+  status BenefitRequestStatus @default(REQUESTED)
+
+  // What the member submitted. The note is required by the action; the other
+  // two are optional prompts to save a round-trip with the manager.
+  note               String
+  preferredTimeframe String?
+  contactPreference  String?
+
+  requestedAt   DateTime @default(now())
+  // Mirrors AuditLog.actorId: the request outlives the contact who raised it.
+  requestedBy   User?    @relation("BenefitRequestRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  requestedById String?
+
+  // Written by sub-issue F; nothing in this PR sets them.
+  acknowledgedAt   DateTime?
+  acknowledgedBy   User?     @relation("BenefitRequestAcknowledgedBy", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+  acknowledgedById String?
+
+  // "Open requests for this partner" (the common read) and "open requests
+  // oldest first" (F's queue, and the lazy 3-month timeout if it ever lands).
+  @@index([organisationId, status])
+  @@index([status, requestedAt])
+  @@index([benefitId])
+  @@index([requestedById])
+}
+
+// PLATFORM SETTINGS
+// -----------------
+// Small admin-editable operational values that belong to no partner and to no
+// catalogue entry, one row per key — the programme-wide partner satisfaction
+// survey link is the first. A missing row means "not set". Read and written
+// only through src/lib/platform-settings.ts, which owns the key list. The
+// migration creates the table empty and nothing seeds it: values are entered
+// from the admin dashboard.
+
+model PlatformSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 // AUTH MODELS (NextAuth-style)

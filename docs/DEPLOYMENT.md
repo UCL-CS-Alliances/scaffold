@@ -69,6 +69,29 @@ Migrations in `prisma/migrations/` are the schema authority.
 
 Never edit or delete a merged migration, never `prisma db push` against a remote database, and never change schema in Supabase's SQL/Table editor. Do not run migrations automatically on every serverless build — apply each reviewed migration once per database through the workflow above. CI validates the full migration history + seed against an ephemeral Postgres, so this is caught without touching Supabase.
 
+## Reference data (the benefit catalogue)
+
+The `Benefit` and `BenefitAction` tables hold the membership benefit catalogue. A migration creates them **empty** — the content is seeded, not written into the migration SQL, so there is only ever one copy of it.
+
+**Never use `npm run db:seed` to populate them on a shared database.** That seed also upserts organisations, users and memberships from `prisma/members.yml` and will rewrite live partner records — including anything corrected by hand after a data migration. Use the catalogue-only seeder:
+
+```bash
+npm run db:seed:benefits -- --force
+```
+
+Without `--force` it prints what it would do and exits — see the warning below for why.
+
+It writes `Benefit` and `BenefitAction` and nothing else. It never touches anything partner-scoped: no organisations, no memberships, and no `BenefitPartnerNote` rows. It reads `.env.local` then `.env` and prefers `DIRECT_URL`, as the Prisma CLI does, but **unlike** the CLI it leaves an exported variable alone — so `DATABASE_URL=… npm run db:seed:benefits -- --force` targets a scratch database without editing `.env.local`. An exported URL wins over **both** of `.env.local`'s: exporting only `DATABASE_URL` beats a `DIRECT_URL` set in the file, so a scratch run cannot be silently redirected to the shared database. That trick does not work on `prisma migrate …`: `prisma.config.ts` loads `.env.local` with `override: true`, so the CLI goes wherever `.env.local` points no matter what you export. Retarget those by editing `.env.local`.
+
+Two properties worth relying on:
+
+- **Repeat-safe.** Running it twice in a row changes nothing the second time. Steps are reconciled by position rather than deleted and recreated, so `BenefitAction.id` stays stable — which matters because the per-partner action tracker hangs progress rows off those ids with `ON DELETE CASCADE`.
+- **It is a hard re-baseline — destructive to admin catalogue work.** The catalogue is editable from the admin dashboard, and this command throws those edits away: every fixture benefit is overwritten (including `isActive`, so a benefit an admin retired comes back), and any benefit the fixture does not define — i.e. one created through the admin UI — is **retired**, not deleted (deletion would cascade its steps, partner notes and tracker progress, and leave redeemed codes unresolvable). Partner-scoped data — redemptions, notes, tracker progress — is never touched. Run it against the shared database only when the *fixture* is the intended source of truth, e.g. to load a content change that went through a PR; if the SAT team has been editing the catalogue in the admin UI, their version is the live one and this command destroys it.
+
+**One column it leaves alone: `Benefit.surveyUrl`.** The per-benefit partner satisfaction survey link is operational config entered from the admin dashboard, not catalogue content, and the fixture has no such field — so a re-baseline neither sets nor clears it. The programme-wide default lives in the `PlatformSetting` table, which its migration creates empty and nothing seeds: an admin enters it under Benefits → Edit catalogue. Neither needs deploy sequencing; a benefit page with no link at either level simply shows no survey button.
+
+**Ordering when the read path changes.** Code that reads these tables must not reach `main` until the rows exist, or every benefit view renders empty. Because Preview and Production share one Supabase database and migrations are applied by hand, this sequencing is not optional: apply the migration, run `npm run db:seed:benefits -- --force`, verify the row counts, and only then merge the code that reads them.
+
 ## Release smoke test
 
 - [ ] `npm ci`, `npm run typecheck`, and `npm run build` pass (`prisma generate` runs in `postinstall`). `npm run lint` is informational in CI while pre-existing `no-explicit-any` debt is cleared.

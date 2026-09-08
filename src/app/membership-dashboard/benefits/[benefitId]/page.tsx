@@ -1,20 +1,67 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { BENEFITS } from "@/content/benefits";
-import { hasBenefitAccess, resolveMemberRank } from "@/lib/benefit-access";
+import {
+  getSupersedingBenefit,
+  hasBenefitAccess,
+  resolveMemberRank,
+} from "@/lib/benefit-access";
+import {
+  getBenefitActionProgressForOrganisation,
+  getBenefitCatalogue,
+  getBenefitPartnerNotesForOrganisation,
+  type BenefitActionProgressMap,
+  type CatalogueBenefit,
+  type OrganisationBenefitRequest,
+} from "@/lib/benefits";
+import prisma from "@/lib/prisma";
+import { getPartnerSurveyUrl } from "@/lib/platform-settings";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { getMemberDashboardData } from "@/lib/membership-dashboard";
 import SecondaryNav from "@/components/membership-dashboard/SecondaryNav";
+import BenefitRequestDialog from "@/components/membership-dashboard/BenefitRequestDialog";
 
 type PageProps = {
   params: Promise<{ benefitId: string }>;
 };
 
-type BenefitStatus = "REDEEMED" | "HAS_ACCESS" | "NO_ACCESS";
+type BenefitStatus =
+  | "REDEEMED"
+  | "REQUESTED"
+  | "ACKNOWLEDGED"
+  | "IN_PROGRESS"
+  | "SUPERSEDED"
+  | "HAS_ACCESS"
+  | "NO_ACCESS";
 
-function determineStatus(hasAccess: boolean, isRedeemed: boolean): BenefitStatus {
-  if (!hasAccess) return "NO_ACCESS";
+// Precedence matters, and the order is deliberate: redeemed FIRST — a
+// delivered benefit reads ✅ Redeemed even when the organisation's current
+// tier no longer includes it (2026-08-22: the old access-first order made
+// such a benefit lie as 🔒 "Not included in your tier") — then tier access,
+// then any open request, then superseded. The open request sits AHEAD of
+// superseded because it is a live fact about this benefit (someone at the
+// organisation has actually asked for it), whereas supersede is advice about
+// a better one — advice must not hide a request already in flight.
+function determineStatus(
+  hasAccess: boolean,
+  isRedeemed: boolean,
+  openRequest: OrganisationBenefitRequest | null,
+  isSuperseded: boolean,
+): BenefitStatus {
   if (isRedeemed) return "REDEEMED";
+  if (!hasAccess) return "NO_ACCESS";
+  if (openRequest) {
+    switch (openRequest.status) {
+      case "REQUESTED":
+        return "REQUESTED";
+      case "ACKNOWLEDGED":
+        return "ACKNOWLEDGED";
+      case "IN_PROGRESS":
+        return "IN_PROGRESS";
+      // CLOSED never reaches here — the resolver returns open requests only —
+      // but fall through to the ordinary statuses rather than lie if it does.
+    }
+  }
+  if (isSuperseded) return "SUPERSEDED";
   return "HAS_ACCESS";
 }
 
@@ -22,6 +69,14 @@ function getStatusMeta(status: BenefitStatus) {
   switch (status) {
     case "REDEEMED":
       return { symbol: "✅", label: "Redeemed" };
+    case "REQUESTED":
+      return { symbol: "⏳", label: "Requested" };
+    case "ACKNOWLEDGED":
+      return { symbol: "📬", label: "Acknowledged" };
+    case "IN_PROGRESS":
+      return { symbol: "🔧", label: "Working on it" };
+    case "SUPERSEDED":
+      return { symbol: "⬆️", label: "Replaced by an upgraded benefit" };
     case "HAS_ACCESS":
       return { symbol: "🟡", label: "Available" };
     case "NO_ACCESS":
@@ -30,29 +85,37 @@ function getStatusMeta(status: BenefitStatus) {
   }
 }
 
-// Support both legacy array process and the newer structured process object
-type ProcessObject = {
-  trigger?: string;
-  actions?: string[];
-  outcome?: string;
-};
-
-function isProcessObject(value: unknown): value is ProcessObject {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
 export default async function BenefitPage({ params }: PageProps) {
   const { benefitId } = await params;
 
   const id = benefitId?.toUpperCase().trim();
   if (!id) notFound();
 
-  const benefit = BENEFITS.find((b) => b.id === id);
+  const benefits = await getBenefitCatalogue(prisma);
+
+  // A retired benefit is not in the catalogue, so its page 404s rather than
+  // presenting a benefit that has been withdrawn.
+  const benefit = benefits.find((b) => b.id === id);
   if (!benefit) notFound();
 
   // Default assumptions: not logged in / no membership data
   let hasAccess = false;
   let isRedeemed = false;
+  // The benefit that replaces this one for this member, if any. The member
+  // dashboard hides superseded benefits from its list, so without this the page
+  // is only reachable by direct URL — and used to present a replaced benefit as
+  // available, with a process to follow that no longer applies.
+  let supersededBy: CatalogueBenefit | null = null;
+  // The SAT-written note for this member's organisation on this benefit, if
+  // one exists. Partner-confidential, so the organisation comes from the
+  // session's user record — never from a query parameter.
+  let partnerNote: string | null = null;
+  // The organisation's admin-recorded progress through this benefit's steps,
+  // keyed by step id. Read-only here — members see it, never change it.
+  let progress: BenefitActionProgressMap = {};
+  // The organisation's open request for this benefit, if one exists — a
+  // colleague's request is the same request, so every contact sees it.
+  let openRequest: OrganisationBenefitRequest | null = null;
 
   const session = await getServerAuthSession();
 
@@ -66,25 +129,60 @@ export default async function BenefitPage({ params }: PageProps) {
         memberData.membershipTierKey,
       );
 
-      hasAccess = hasBenefitAccess(myRank, benefit.tierMin);
+      hasAccess = hasBenefitAccess(myRank, benefit.tierMinRank);
       isRedeemed = memberData.redeemedBenefitCodes.includes(id);
+      supersededBy = getSupersedingBenefit(myRank, benefits, benefit.id);
+      openRequest = memberData.openBenefitRequests[id] ?? null;
+
+      if (memberData.organisationId != null) {
+        const notes = await getBenefitPartnerNotesForOrganisation(
+          prisma,
+          memberData.organisationId,
+        );
+        partnerNote = notes[id] ?? null;
+
+        progress = await getBenefitActionProgressForOrganisation(
+          prisma,
+          memberData.organisationId,
+        );
+      }
     }
   }
 
-  const status = determineStatus(hasAccess, isRedeemed);
+  const status = determineStatus(
+    hasAccess,
+    isRedeemed,
+    openRequest,
+    supersededBy != null,
+  );
   const { symbol, label } = getStatusMeta(status);
+
+  // The satisfaction survey is offered once the benefit is delivered — on
+  // REDEEMED alone, which by the precedence above includes a benefit redeemed
+  // outside the current tier. The benefit's own link wins over the
+  // programme-wide PlatformSetting, and the default is only read when it is
+  // needed, so the other statuses cost no extra query. No link at either
+  // level means no button: a member is never shown a stub.
+  const surveyUrl =
+    status === "REDEEMED"
+      ? (benefit.surveyUrl ?? (await getPartnerSurveyUrl(prisma)))
+      : null;
+
+  // Process, terms and the back link stay on the page throughout the request
+  // ladder: has access, not redeemed, not superseded. Gating them on
+  // HAS_ACCESS alone would make them vanish the moment a member requests.
+  const showProcessAndTerms =
+    status === "HAS_ACCESS" ||
+    status === "REQUESTED" ||
+    status === "ACKNOWLEDGED" ||
+    status === "IN_PROGRESS";
 
   const backHref = "/membership-dashboard/";
 
-  const processValue = benefit.process as unknown;
-
-  const processAsObject = isProcessObject(processValue)
-    ? (processValue as ProcessObject)
-    : null;
-
-  const processAsArray = Array.isArray(processValue)
-    ? (processValue as string[])
-    : null;
+  const process = benefit.process;
+  const hasProcess = Boolean(
+    process.trigger || process.outcome || process.actions.length > 0,
+  );
 
   return (
     <section className="content-section">
@@ -105,12 +203,67 @@ export default async function BenefitPage({ params }: PageProps) {
         {status === "REDEEMED" && (
           <>
             <p>
-              This benefit has already been redeemed under your current
-              membership. If you believe this is incorrect, please contact the
-              Strategic Alliances team.
+              This benefit has already been redeemed
+              {hasAccess ? " under your current membership" : ""}.
+              {!hasAccess &&
+                " It was redeemed under a previous arrangement and is not included in your current membership tier."}{" "}
+              If you believe this is incorrect, please contact the Strategic
+              Alliances team.
+            </p>
+
+            {/* Survey: its own block, gated on status alone — never on the
+                nullable, admin-editable process.outcome text the placeholder
+                used to sit inside, which an admin clearing the outcome would
+                have silently removed. External, so a plain anchor rather
+                than <Link>, in a new tab; nothing is recorded on click. */}
+            {surveyUrl && (
+              <div style={{ marginTop: "1.25rem" }}>
+                <h3>Tell us how it went</h3>
+                <p>
+                  Your feedback helps the Strategic Alliances Team improve
+                  this benefit for every partner. The survey opens in a new
+                  tab.
+                </p>
+                <a
+                  href={surveyUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="button-link button-link--primary"
+                  style={{ marginTop: "0.5rem" }}
+                >
+                  Launch partner satisfaction survey
+                </a>
+              </div>
+            )}
+
+            <p style={{ marginTop: "1.25rem" }}>
+              <Link
+                href={backHref}
+                className="button-link button-link--secondary"
+              >
+                Back to benefits list
+              </Link>
+            </p>
+          </>
+        )}
+
+        {status === "SUPERSEDED" && supersededBy && (
+          <>
+            <p>
+              Your membership tier includes {supersededBy.label}, which replaces
+              this benefit. Arrange that instead — there is no need to request
+              this one separately.
             </p>
 
             <p style={{ marginTop: "1.25rem" }}>
+              <Link
+                href={`/membership-dashboard/benefits/${supersededBy.id}`}
+                className="button-link button-link--primary"
+                style={{ marginRight: "0.75rem" }}
+              >
+                Go to {supersededBy.label}
+              </Link>
+
               <Link
                 href={backHref}
                 className="button-link button-link--secondary"
@@ -162,74 +315,167 @@ export default async function BenefitPage({ params }: PageProps) {
             Coordinate next steps with your client experience manager.
           </p>
         )}
+
+        {status === "REQUESTED" && openRequest && (
+          <>
+            <p>
+              {openRequest.requestedByName ?? "A colleague"} requested this
+              benefit for your organisation on{" "}
+              {new Intl.DateTimeFormat("en-GB", {
+                dateStyle: "medium",
+              }).format(openRequest.requestedAt)}
+              . Your client experience manager will be in touch to arrange the
+              next steps — there is nothing more you need to do. To change or
+              withdraw the request, speak to your manager directly.
+            </p>
+
+            {/* Echo what was submitted, so the member can see what their
+                organisation asked for without having to remember it. */}
+            <div
+              className="tile"
+              style={{ marginTop: "0.75rem", padding: "0.75rem 1rem" }}
+            >
+              <p className="small" style={{ margin: 0 }}>
+                <strong>The request</strong>
+              </p>
+              <p style={{ whiteSpace: "pre-wrap", margin: "0.25rem 0 0" }}>
+                {openRequest.note}
+              </p>
+              {openRequest.preferredTimeframe && (
+                <p className="small" style={{ margin: "0.5rem 0 0" }}>
+                  Preferred timeframe: {openRequest.preferredTimeframe}
+                </p>
+              )}
+              {openRequest.contactPreference && (
+                <p className="small" style={{ margin: "0.25rem 0 0" }}>
+                  Best contact: {openRequest.contactPreference}
+                </p>
+              )}
+            </div>
+          </>
+        )}
+
+        {status === "ACKNOWLEDGED" && (
+          <p>
+            Your client experience manager has acknowledged your
+            organisation&apos;s request for this benefit. The next steps are
+            the benefit&apos;s process actions below — your organisation&apos;s
+            progress through them is shown as the team records it.
+          </p>
+        )}
+
+        {status === "IN_PROGRESS" && (
+          <p>
+            Your client experience manager is working on your
+            organisation&apos;s request for this benefit. Progress through the
+            process steps below is recorded as it happens.
+          </p>
+        )}
       </section>
 
-      {/* HAS ACCESS ONLY: process + terms */}
-      {status === "HAS_ACCESS" && (
+      {/* Partner note: written by the SAT about this organisation, rendered on
+          every status — a note explaining why a benefit is unavailable or
+          replaced is exactly the useful case. Plain text, whitespace kept. */}
+      {partnerNote && (
+        <section
+          className="tile"
+          style={{ marginTop: "1.5rem", padding: "1rem" }}
+        >
+          <h2>Note from the Strategic Alliances Team</h2>
+          <p style={{ whiteSpace: "pre-wrap", marginTop: ".5rem" }}>
+            {partnerNote}
+          </p>
+        </section>
+      )}
+
+      {/* Available or requested (see showProcessAndTerms): process + terms */}
+      {showProcessAndTerms && (
         <>
+          {/* Request: its own block, deliberately NOT inside the trigger
+              section below — Benefit.trigger is nullable and admin-editable,
+              so parking the button there would let an admin clearing the
+              trigger text silently remove the only way to request. */}
+          {status === "HAS_ACCESS" && (
+            <section style={{ marginTop: "1.5rem" }}>
+              <h2>Request this benefit</h2>
+              <p>
+                Ready to use this benefit? Send your client experience manager
+                a request and they will arrange it with you.
+              </p>
+              <BenefitRequestDialog
+                benefitCode={benefit.id}
+                benefitLabel={benefit.label}
+              />
+            </section>
+          )}
+
           {/* Process */}
-          {(processAsObject || (processAsArray && processAsArray.length > 0)) && (
+          {hasProcess && (
             <section className="benefit-process" style={{ marginTop: "1.5rem" }}>
               <h2>How this benefit works</h2>
               <p>To redeem this benefit, follow the process outlined below.</p>
 
-              {/* New structured process */}
-              {processAsObject && (
-                <>
-                  {processAsObject.trigger && (
-                    <section style={{ marginTop: "1rem" }}>
-                      <h3>Trigger</h3>
-                      <p>{processAsObject.trigger}</p>
-                      <button
-                        type="button"
-                        className="button-link button-link--primary"
-                        disabled
-                        aria-disabled="true"
-title="This action will be enabled in a future release."
-                        style={{ marginTop: "0.5rem" }}
-                      >
-                        Redeem benefit now
-                      </button>
-                    </section>
-                  )}
-
-                  {processAsObject.actions && processAsObject.actions.length > 0 && (
-                    <section style={{ marginTop: "1.25rem" }}>
-                      <h3>Actions</h3>
-                      <ul>
-                        {processAsObject.actions.map((step, idx) => (
-                          <li key={idx}>{step}</li>
-                        ))}
-                      </ul>
-                    </section>
-                  )}
-
-                  {processAsObject.outcome && (
-                    <section style={{ marginTop: "1.25rem" }}>
-                      <h3>Outcome</h3>
-                      <p>{processAsObject.outcome}</p>
-                      <button
-                        type="button"
-                        className="button-link button-link--primary"
-                        disabled
-                        aria-disabled="true"
-title="This action will be enabled in a future release."
-                        style={{ marginTop: "0.5rem" }}
-                      >
-                        Launch partner satisfaction survey
-                      </button>
-                    </section>
-                  )}
-                </>
+              {process.trigger && (
+                <section style={{ marginTop: "1rem" }}>
+                  <h3>Trigger</h3>
+                  <p>{process.trigger}</p>
+                </section>
               )}
 
-              {/* Legacy array process (fallback) */}
-              {processAsArray && (
-                <ul style={{ marginTop: "1rem" }}>
-                  {processAsArray.map((step, idx) => (
-                    <li key={idx}>{step}</li>
-                  ))}
-                </ul>
+              {process.actions.length > 0 &&
+                (() => {
+                  // Admin-recorded progress, shown read-only. State is
+                  // announced in visible text ("Completed …"), never by
+                  // colour or a glyph alone; the tick mark is decorative.
+                  const completedCount = process.actions.filter(
+                    (step) => progress[step.id],
+                  ).length;
+                  const hasProgress = completedCount > 0;
+
+                  return (
+                    <section style={{ marginTop: "1.25rem" }}>
+                      <h3>Actions</h3>
+
+                      {hasProgress && (
+                        <p className="small">
+                          Your organisation has completed {completedCount} of{" "}
+                          {process.actions.length} steps, recorded by the
+                          Strategic Alliances Team.
+                        </p>
+                      )}
+
+                      <ul>
+                        {process.actions.map((step) => {
+                          const completedAt =
+                            progress[step.id]?.completedAt ?? null;
+                          const done = Boolean(progress[step.id]);
+
+                          return (
+                            <li key={step.id}>
+                              {step.body}
+                              {done && (
+                                <span className="small">
+                                  {" "}
+                                  <span aria-hidden="true">✓</span> Completed
+                                  {completedAt &&
+                                    ` ${new Intl.DateTimeFormat("en-GB", {
+                                      dateStyle: "medium",
+                                    }).format(completedAt)}`}
+                                </span>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  );
+                })()}
+
+              {process.outcome && (
+                <section style={{ marginTop: "1.25rem" }}>
+                  <h3>Outcome</h3>
+                  <p>{process.outcome}</p>
+                </section>
               )}
             </section>
           )}

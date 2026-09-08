@@ -2,8 +2,28 @@
 import { NextResponse } from "next/server";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { prisma } from "@/lib/prisma";
-import { getSatTeamManager, resolveManagerByName } from "@/content/contactRouting";
+import { getSatTeamManager, SAT_MANAGER_ID } from "@/content/contactRouting";
+import {
+  getContactManagerOptions,
+  resolveAssignedContactManager,
+  type ContactManagerOption,
+} from "@/lib/contact-managers";
 import { getMembershipForOrganisation } from "@/lib/membership";
+
+function satOnly(): {
+  managers: ContactManagerOption[];
+  defaultManagerId: string;
+  defaultManagerCalendlyUrl: string;
+} {
+  const sat = getSatTeamManager();
+  return {
+    managers: [
+      { id: SAT_MANAGER_ID, name: sat.name, calendlyUrl: sat.calendlyUrl },
+    ],
+    defaultManagerId: SAT_MANAGER_ID,
+    defaultManagerCalendlyUrl: sat.calendlyUrl,
+  };
+}
 
 export async function GET() {
   const session = await getServerAuthSession();
@@ -14,7 +34,7 @@ export async function GET() {
       name: "",
       email: "",
       organisation: "",
-      defaultManagerName: "Strategic Alliances Team",
+      ...satOnly(),
     });
   }
 
@@ -29,7 +49,7 @@ export async function GET() {
       name,
       email,
       organisation: "",
-      defaultManagerName: "Strategic Alliances Team",
+      ...satOnly(),
     });
   }
 
@@ -48,16 +68,22 @@ export async function GET() {
     : null;
 
   const organisation = user?.organisation?.name ?? "";
-  const managerNameRaw = membership?.managerName ?? null;
 
-  const defaultManager =
-    resolveManagerByName(managerNameRaw) ?? getSatTeamManager();
+  const [managers, defaultManager] = await Promise.all([
+    getContactManagerOptions(prisma),
+    resolveAssignedContactManager(
+      prisma,
+      membership?.clientExperienceManager?.id ?? null,
+    ),
+  ]);
 
   return NextResponse.json({
     isAuthenticated: true,
     name,
     email,
     organisation,
-    defaultManagerName: defaultManager.name,
+    managers,
+    defaultManagerId: defaultManager.id,
+    defaultManagerCalendlyUrl: defaultManager.calendlyUrl,
   });
 }

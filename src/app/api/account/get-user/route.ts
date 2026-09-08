@@ -55,7 +55,7 @@ export async function GET(req: Request) {
     tierLabel: membership?.tierLabel ?? null,
     status: membership?.status ?? null,
     expiryText,
-    managerName: membership?.managerName ?? null,
+    managerName: membership?.clientExperienceManager?.name ?? null,
     isActive: membership?.isActive ?? null,
   };
 
@@ -63,7 +63,9 @@ export async function GET(req: Request) {
     ? {
         membershipTierId: membership.membershipTierId,
         status: membership.status,
-        managerName: membership.managerName,
+        // id and name both: the editor needs the id to save and the name to
+        // still render an assignment whose admin has since been demoted.
+        clientExperienceManager: membership.clientExperienceManager,
         expiryText: expiryText ?? "",
         isActive: membership.isActive,
       }

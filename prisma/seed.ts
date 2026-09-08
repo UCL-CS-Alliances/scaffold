@@ -1,11 +1,12 @@
 // prisma/seed.ts
-import { PrismaClient, OrganisationType } from '@prisma/client';
+import { PrismaClient, OrganisationType, BenefitRequestStatus } from '@prisma/client';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
 import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { seedBenefits } from './seed-benefits';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -28,7 +29,9 @@ type RawMember = {
     tier: 'bronze' | 'silver' | 'gold' | 'platinum';
     status: 'active' | 'inactive';
     expiry?: string | Date;
-    manager?: string;
+    // Email of an ADMIN user, resolved to the organisation's client
+    // experience manager once every user has been seeded.
+    manager_email?: string;
   };
   // Further contacts at the same organisation, beyond the main one in
   // `company`. They share the organisation's tier — membership is a property of
@@ -391,6 +394,12 @@ async function main() {
   const tierIdByYaml = await seedMembershipTiers();
   const roleIdByKey = await seedRoles();
   const apps = await seedApps();
+
+  // Reference data, alongside tiers/roles/apps: it needs the tiers to exist and
+  // nothing else needs it. Lives in its own module because it must also be
+  // runnable on its own, without the members.yml writes below.
+  await seedBenefits(prisma);
+
   const memberRoleId = roleIdByKey.get('MEMBER');
 
   if (!memberRoleId) {
@@ -480,7 +489,6 @@ async function main() {
       membershipTierId: tierId,
       isActive,
       status: m.membership.status,
-      managerName: m.membership.manager ?? null,
       expiry,
     };
 
@@ -547,8 +555,124 @@ async function main() {
 
   await seedAppAccessRules(apps, tierIdByYaml);
   await seedDemoUsers(apps, roleIdByKey);
+  await seedClientExperienceManagers(rawMembers);
+  await seedBenefitRequests();
 
   console.log('\nSeeding complete ✅');
+}
+
+// Runs after the member loop and seedBenefits, so the organisation, its
+// contacts and the benefit all exist. Raised by Nia — the *second* Microsoft
+// contact — deliberately: the request is the organisation's, so Arun, the
+// primary contact, sees a colleague's request on his own dashboard.
+async function seedBenefitRequests() {
+  console.log('\nSeeding benefit redemption requests…');
+
+  const organisation = await prisma.organisation.findUnique({
+    where: { slug: 'microsoft' },
+    select: { id: true },
+  });
+  const benefit = await prisma.benefit.findUnique({
+    where: { code: 'B04' },
+    select: { id: true },
+  });
+  const requester = await prisma.user.findUnique({
+    where: { email: 'research@microsoft.example.com' },
+    select: { id: true },
+  });
+
+  if (!organisation || !benefit || !requester) {
+    console.warn('  ! Skipping benefit request seed: Microsoft, B04 or Nia not found');
+    return;
+  }
+
+  // create() is not repeat-safe: the partial unique index allows one *open*
+  // request per (organisation, benefit) and CI runs the seed twice. Prisma
+  // upsert cannot target an index it cannot express, so find the open request
+  // first and converge it in place — fixture wins, like the rest of the seed.
+  const existing = await prisma.benefitRedemptionRequest.findFirst({
+    where: {
+      organisationId: organisation.id,
+      benefitId: benefit.id,
+      status: {
+        in: [
+          BenefitRequestStatus.REQUESTED,
+          BenefitRequestStatus.ACKNOWLEDGED,
+          BenefitRequestStatus.IN_PROGRESS,
+        ],
+      },
+    },
+    select: { id: true },
+  });
+
+  const fields = {
+    status: BenefitRequestStatus.REQUESTED,
+    note: 'We would like to promote two graduate software engineering roles to final-year and MSc students this academic year.',
+    preferredTimeframe: 'Early in the autumn term',
+    contactPreference: null,
+    requestedById: requester.id,
+    acknowledgedAt: null,
+    acknowledgedById: null,
+  };
+
+  if (existing) {
+    await prisma.benefitRedemptionRequest.update({
+      where: { id: existing.id },
+      data: fields,
+    });
+    console.log(`  - microsoft → B04: open request converged (id=${existing.id})`);
+  } else {
+    const created = await prisma.benefitRedemptionRequest.create({
+      data: {
+        organisationId: organisation.id,
+        benefitId: benefit.id,
+        ...fields,
+      },
+    });
+    console.log(`  - microsoft → B04: open request created (id=${created.id})`);
+  }
+}
+
+// Runs after every user exists — the admins a manager_email can name are
+// seeded in seedDemoUsers, *after* the member loop that creates the
+// memberships. Sets or clears the assignment explicitly, so a reseed
+// converges regardless of prior state (CI runs the seed twice).
+async function seedClientExperienceManagers(rawMembers: RawMember[]) {
+  console.log('\nAssigning client experience managers…');
+
+  for (const m of rawMembers) {
+    const organisation = await prisma.organisation.findUnique({
+      where: { slug: m.id },
+      select: { id: true },
+    });
+    if (!organisation) continue;
+
+    let managerId: string | null = null;
+    if (m.membership.manager_email) {
+      const candidate = await prisma.user.findFirst({
+        where: {
+          email: m.membership.manager_email,
+          roles: { some: { role: { key: 'ADMIN' } } },
+        },
+        select: { id: true },
+      });
+      if (!candidate) {
+        console.warn(
+          `  ! manager_email ${m.membership.manager_email} for "${m.id}" is not an ADMIN user; leaving unassigned`,
+        );
+      }
+      managerId = candidate?.id ?? null;
+    }
+
+    await prisma.membership.update({
+      where: { organisationId: organisation.id },
+      data: { clientExperienceManagerId: managerId },
+    });
+
+    if (managerId) {
+      console.log(`  - ${m.id}: ${m.membership.manager_email}`);
+    }
+  }
 }
 
 main()

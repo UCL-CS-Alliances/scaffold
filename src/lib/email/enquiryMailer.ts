@@ -7,6 +7,7 @@ type SendMailArgs = {
   from: string;
   to: string;
   cc: string[];
+  reply_to: string;
   subject: string;
   text: string;
 };
@@ -69,13 +70,15 @@ export async function sendMailgun(args: SendMailArgs) {
   const mailgun = new Mailgun(FormData);
   const mg = mailgun.client({
     username: "api",
-    key: process.env.MAILGUN_API_KEY!
+    key: process.env.MAILGUN_API_KEY!,
+    url: "https://api.eu.mailgun.net"
   });
 
   const data = await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
     from: args.from,
     to: args.to,
     cc: args.cc,
+    "h:Reply-To": args.reply_to,
     subject: args.subject,
     text: args.text,
   });

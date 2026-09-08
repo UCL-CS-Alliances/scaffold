@@ -250,7 +250,7 @@ export default function CreateUserForm(props: { meta: Meta }) {
             membership: {
               membershipTierId: null,
               status: null,
-              managerName: null,
+              clientExperienceManagerId: null,
               expiryText: null,
               isActive: true,
             },

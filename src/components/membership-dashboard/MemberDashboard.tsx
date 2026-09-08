@@ -4,6 +4,10 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
+import type {
+  CatalogueBenefit,
+  OrganisationBenefitRequest,
+} from "@/lib/benefits";
 import {
   getEffectiveBenefits,
   hasBenefitAccess,
@@ -11,6 +15,7 @@ import {
 } from "@/lib/benefit-access";
 import SecondaryNav from "@/components/membership-dashboard/SecondaryNav";
 import BenefitsFilterToolbar from "@/components/membership-dashboard/BenefitsFilterToolbar";
+import { getSatTeamManager } from "@/content/contactRouting";
 
 type MemberDashboardProps = {
   firstName: string;
@@ -23,9 +28,17 @@ type MemberDashboardProps = {
   membershipManagerName: string | null;
 
   redeemedBenefitCodes: string[];
+
+  // The organisation's open benefit requests, keyed by benefit code — a
+  // colleague's request shows here too.
+  openBenefitRequests: Record<string, OrganisationBenefitRequest>;
+
+  // Resolved by the server component: this is a client component and cannot
+  // read the catalogue itself.
+  benefits: CatalogueBenefit[];
 };
 
-type BenefitFilter = "redeemed" | "available" | "locked" | null;
+type BenefitFilter = "redeemed" | "requested" | "available" | "locked" | null;
 
 export default function MemberDashboard(props: MemberDashboardProps) {
   const {
@@ -37,6 +50,8 @@ export default function MemberDashboard(props: MemberDashboardProps) {
     membershipExpiry,
     membershipManagerName,
     redeemedBenefitCodes,
+    openBenefitRequests,
+    benefits,
   } = props;
 
   const [filter, setFilter] = useState<BenefitFilter>(null);
@@ -46,7 +61,10 @@ export default function MemberDashboard(props: MemberDashboardProps) {
   const redeemed = useMemo(() => new Set(redeemedBenefitCodes), [redeemedBenefitCodes]);
 
   // Benefits superseded by a better one the member already has are hidden
-  const benefitsEffective = useMemo(() => getEffectiveBenefits(myRank), [myRank]);
+  const benefitsEffective = useMemo(
+    () => getEffectiveBenefits(myRank, benefits),
+    [myRank, benefits],
+  );
 
   const formattedExpiry =
     membershipExpiry != null
@@ -55,34 +73,57 @@ export default function MemberDashboard(props: MemberDashboardProps) {
         )
       : "Not set";
 
-  // Default always to Marco Piccionello when not provided
+  // No assigned manager: the Strategic Alliances Team fronts the relationship,
+  // matching the check-in link and contact form fallbacks.
   const manager =
     membershipManagerName && membershipManagerName.trim().length
       ? membershipManagerName
-      : "Marco Piccionello";
+      : getSatTeamManager().name;
 
-  // Build benefit rows with computed state
+  // Build benefit rows with computed state. Precedence: redeemed → locked →
+  // requested → available. Redeemed comes FIRST (2026-08-22): a delivered
+  // benefit reads ✅ even when the current tier no longer includes it — the
+  // old locked-first order hid such redemptions behind 🔒. The three open
+  // request statuses share the single "requested" filter state (so one
+  // toolbar toggle covers them all) but carry their own glyph and label,
+  // matching the detail page.
   const benefitRows = useMemo(() => {
     return benefitsEffective.map((b) => {
       let state: Exclude<BenefitFilter, null> = "locked";
       let symbol = "🔒";
+      let stateLabel = "Not included in your tier";
 
-      if (hasBenefitAccess(myRank, b.tierMin)) {
-        if (redeemed.has(b.id)) {
-          state = "redeemed";
-          symbol = "✅";
+      if (redeemed.has(b.id)) {
+        state = "redeemed";
+        symbol = "✅";
+        stateLabel = "Redeemed";
+      } else if (hasBenefitAccess(myRank, b.tierMinRank)) {
+        const request = openBenefitRequests[b.id];
+        if (request?.status === "ACKNOWLEDGED") {
+          state = "requested";
+          symbol = "📬";
+          stateLabel = "Acknowledged";
+        } else if (request?.status === "IN_PROGRESS") {
+          state = "requested";
+          symbol = "🔧";
+          stateLabel = "Working on it";
+        } else if (request) {
+          state = "requested";
+          symbol = "⏳";
+          stateLabel = "Requested";
         } else {
           state = "available";
           symbol = "🟡";
+          stateLabel = "Available";
         }
       }
 
-      return { benefit: b, state, symbol };
+      return { benefit: b, state, symbol, stateLabel };
     });
-  }, [benefitsEffective, myRank, redeemed]);
+  }, [benefitsEffective, myRank, redeemed, openBenefitRequests]);
 
   const counts = useMemo(() => {
-    const c = { redeemed: 0, available: 0, locked: 0 };
+    const c = { redeemed: 0, requested: 0, available: 0, locked: 0 };
     benefitRows.forEach((r) => {
       c[r.state] += 1;
     });
@@ -149,11 +190,16 @@ export default function MemberDashboard(props: MemberDashboardProps) {
           className="list-plain stack"
           style={{ "--stack-gap": ".5rem" } as CSSProperties}
         >
-          {visibleRows.map(({ benefit: b, symbol }) => (
+          {visibleRows.map(({ benefit: b, symbol, stateLabel }) => (
             <li key={b.id}>
               <div className="tile" style={{ padding: ".5rem .75rem" }}>
                 <div className="benefit">
-                  <span className="benefit-state">{symbol}</span>
+                  {/* The glyph is decorative; the state is announced by the
+                      sr-only text so it never rides on the emoji alone. */}
+                  <span className="benefit-state" aria-hidden="true">
+                    {symbol}
+                  </span>
+                  <span className="sr-only">{stateLabel}</span>
                   <Link
                     href={`/membership-dashboard/benefits/${b.id}`}
                     className="benefit-link"

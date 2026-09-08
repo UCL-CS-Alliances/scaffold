@@ -16,6 +16,7 @@
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
+    "db:seed:benefits": "tsx prisma/seed-benefits.ts",
     "db:studio": "prisma studio",
     "postinstall": "prisma generate"
   },
@@ -35,9 +36,6 @@
     "nodemailer": "^7.0.13",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "remark": "^15.0.1",
-    "remark-gfm": "^4.0.1",
-    "remark-html": "^16.0.1",
     "yaml": "2.9.0"
   },
   "devDependencies": {

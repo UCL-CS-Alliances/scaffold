@@ -26,7 +26,11 @@ export type AuditAction =
   | "DELETE"
   | "LOGIN"
   | "PASSWORD_RESET"
-  | "PASSWORD_CHANGE";
+  | "PASSWORD_CHANGE"
+  | "BENEFIT_REQUEST_RAISED"
+  | "BENEFIT_REQUEST_ACKNOWLEDGED"
+  | "BENEFIT_REQUEST_STARTED"
+  | "BENEFIT_REQUEST_CLOSED";
 
 // Accepts the shared client or a transaction client, so callers can include
 // the audit write in an existing $transaction.

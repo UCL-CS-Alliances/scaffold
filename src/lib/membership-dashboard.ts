@@ -4,6 +4,10 @@ import {
   getMembershipForOrganisation,
   getRedeemedBenefitCodesForOrganisation,
 } from "@/lib/membership";
+import {
+  getOpenBenefitRequestsForOrganisation,
+  type OrganisationBenefitRequest,
+} from "@/lib/benefits";
 
 export type AdminTierSummary = {
   id: number;
@@ -22,6 +26,10 @@ export type AdminDashboardSummary = {
 
 export type MemberDashboardData = {
   firstName: string;
+  // Resolved from the signed-in user's record, so pages needing
+  // organisation-scoped reads (e.g. the partner note on the benefit detail
+  // page) never take an organisation from a query parameter.
+  organisationId: number | null;
   organisationName: string | null;
 
   // Membership info
@@ -33,6 +41,9 @@ export type MemberDashboardData = {
 
   // Dashboard-specific data
   redeemedBenefitCodes: string[];
+  // Open benefit requests, keyed by benefit code — the organisation's, like
+  // redemption, so a colleague's request shows on every contact's dashboard.
+  openBenefitRequests: Record<string, OrganisationBenefitRequest>;
 };
 
 export async function getAdminDashboardSummary(): Promise<AdminDashboardSummary> {
@@ -104,21 +115,25 @@ export async function getMemberDashboardData(
 
   // Tier and redemption both belong to the organisation, so every contact at
   // one partner sees the same dashboard.
-  const [membership, redeemedBenefitCodes] = user.organisationId
-    ? await Promise.all([
-        getMembershipForOrganisation(prisma, user.organisationId),
-        getRedeemedBenefitCodesForOrganisation(prisma, user.organisationId),
-      ])
-    : [null, [] as string[]];
+  const [membership, redeemedBenefitCodes, openBenefitRequests] =
+    user.organisationId
+      ? await Promise.all([
+          getMembershipForOrganisation(prisma, user.organisationId),
+          getRedeemedBenefitCodesForOrganisation(prisma, user.organisationId),
+          getOpenBenefitRequestsForOrganisation(prisma, user.organisationId),
+        ])
+      : [null, [] as string[], {} as Record<string, OrganisationBenefitRequest>];
 
   return {
     firstName: user.firstName,
+    organisationId: user.organisationId,
     organisationName: user.organisation?.name ?? null,
     membershipTierLabel: membership?.tierLabel ?? "Unknown tier",
     membershipTierKey: membership?.tierKey ?? null,
     membershipTierRank: membership?.tierRank ?? null,
     membershipExpiry: membership?.expiry ?? null,
-    membershipManagerName: membership?.managerName ?? null,
+    membershipManagerName: membership?.clientExperienceManager?.name ?? null,
     redeemedBenefitCodes,
+    openBenefitRequests,
   };
 }

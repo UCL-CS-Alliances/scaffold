@@ -1,12 +1,17 @@
 // src/components/membership-dashboard/BenefitsFilterToolbar.tsx
 "use client";
 
-type BenefitFilter = "redeemed" | "available" | "locked" | null;
+type BenefitFilter = "redeemed" | "requested" | "available" | "locked" | null;
 
 type Props = {
   value: BenefitFilter;
   onChange: (next: BenefitFilter) => void;
-  counts: { redeemed: number; available: number; locked: number };
+  counts: {
+    redeemed: number;
+    requested: number;
+    available: number;
+    locked: number;
+  };
 };
 
 function toggle(next: Exclude<BenefitFilter, null>, current: BenefitFilter) {
@@ -27,6 +32,18 @@ export default function BenefitsFilterToolbar({ value, onChange, counts }: Props
         >
           ✅ <span className="sr-only">Redeemed</span>
           <span aria-hidden="true">Redeemed</span> ({counts.redeemed})
+        </button>
+
+        <button
+          type="button"
+          className={["filter-toggle", value === "requested" ? "is-on" : ""]
+            .filter(Boolean)
+            .join(" ")}
+          aria-pressed={value === "requested"}
+          onClick={() => onChange(toggle("requested", value))}
+        >
+          ⏳ <span className="sr-only">Requested</span>
+          <span aria-hidden="true">Requested</span> ({counts.requested})
         </button>
 
         <button
