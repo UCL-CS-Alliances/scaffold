@@ -154,6 +154,9 @@ export default function AccountPageClient(props: {
         onOrganisationDeleted={() => {
           router.refresh();
         }}
+        onRoleDeleted={() => {
+          router.refresh();
+        }}
         onUserDeleted={() => {
           // Name the user before dropping the selection — selectedLabel is
           // derived from it, and the refreshed list will no longer contain them.
