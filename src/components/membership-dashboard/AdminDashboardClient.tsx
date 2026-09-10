@@ -23,7 +23,13 @@ import {
   closeBenefitRequestAction,
   startBenefitRequestAction,
 } from "@/lib/membership-dashboard-actions";
+import type { AuditLogPage } from "@/lib/audit-log-admin";
+import { AUDIT_FILTER_PARAM_KEYS } from "@/lib/audit-log-shared";
 import { satHandbook } from "@/content/satHandbook";
+import AuditLogPanel, {
+  type AuditFilterDraft,
+  type AuditPagerDirection,
+} from "./AuditLogPanel";
 import BenefitCatalogueEditor from "./BenefitCatalogueEditor";
 import BenefitPartnerNotes from "./BenefitPartnerNotes";
 import BenefitRedemptionChecklist, {
@@ -38,10 +44,17 @@ function errorMessage(e: unknown) {
     : "The change could not be saved.";
 }
 
-type TabKey = "members" | "benefits" | "handbook";
+type TabKey = "members" | "benefits" | "handbook" | "audit";
 
 function asTabKey(v: string | null | undefined): TabKey | null {
-  if (v === "members" || v === "benefits" || v === "handbook") return v;
+  if (
+    v === "members" ||
+    v === "benefits" ||
+    v === "handbook" ||
+    v === "audit"
+  ) {
+    return v;
+  }
   return null;
 }
 
@@ -251,6 +264,7 @@ export default function AdminDashboardClient(props: {
   benefitStats: AdminBenefitRedemptionStat[];
   openRequestQueue: AdminOpenBenefitRequest[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
+  auditPage: AuditLogPage | null;
   partnerNotes: Record<string, string>;
   partnerProgress: BenefitActionProgressMap;
   partnerOpenRequests: Record<string, OrganisationBenefitRequest>;
@@ -268,6 +282,7 @@ export default function AdminDashboardClient(props: {
     benefitStats,
     openRequestQueue,
     benefitAuditTrail,
+    auditPage,
     partnerNotes,
     partnerProgress,
     partnerOpenRequests,
@@ -278,9 +293,12 @@ export default function AdminDashboardClient(props: {
 
   const router = useRouter();
   const sp = useSearchParams();
-  // Only the trigger is needed now: per-benefit saves own their pending state
-  // inside BenefitRedemptionChecklist.
-  const [, startTransition] = useTransition();
+  // isPending is read only by the audit panel, as a secondary "Updating…"
+  // hint. It cannot be that panel's primary loading signal, because it is true
+  // for every navigation from this component — selecting a partner included —
+  // and would blank the table on unrelated changes. Per-benefit saves still
+  // own their own pending state inside BenefitRedemptionChecklist.
+  const [isPending, startTransition] = useTransition();
 
   // Local select state fixes "snap back" during RSC refresh
   const [localSelectedUserId, setLocalSelectedUserId] = useState(
@@ -354,8 +372,94 @@ export default function AdminDashboardClient(props: {
     const params = new URLSearchParams(sp?.toString());
     params.set("tab", next);
 
+    // Leaving the audit tab drops its filters and cursor, so a members-tab
+    // URL cannot carry a stale page position back in later.
+    if (next !== "audit") clearAuditParams(params);
+
     startTransition(() => {
       pushWithParams(params);
+    });
+  }
+
+  function clearAuditParams(params: URLSearchParams) {
+    for (const key of AUDIT_FILTER_PARAM_KEYS) params.delete(key);
+  }
+
+  /**
+   * Audit navigation always rebuilds the whole `audit*` set from the draft
+   * rather than merging into what is already there.
+   *
+   * Merging would inherit the stale-clone race the other handlers here have:
+   * `sp` is the *committed* URL, so two changes inside one round trip build
+   * the second clone from the pre-first-change URL and silently drop the
+   * first. With one `?view=` that is hard to hit; with six filters it is
+   * ordinary use. Rebuilding also drops the pagination cursor for free, which
+   * a filter change has to do — otherwise narrowing the entity type while on a
+   * deep page lands on an empty screen with only "Newer" as a way out.
+   */
+  function pushAuditParams(next: Partial<Record<string, string>>) {
+    const params = new URLSearchParams(sp?.toString());
+    params.set("tab", "audit");
+    clearAuditParams(params);
+
+    for (const [key, value] of Object.entries(next)) {
+      if (value) params.set(key, value);
+    }
+
+    startTransition(() => {
+      pushWithParams(params);
+    });
+  }
+
+  function applyAuditFilters(draft: AuditFilterDraft) {
+    pushAuditParams({
+      auditEntity: draft.entityType,
+      auditEntityId: draft.entityId,
+      auditAction: draft.action,
+      auditActor: draft.actorId,
+      auditFrom: draft.from,
+      auditTo: draft.to,
+    });
+  }
+
+  function clearAuditFilters() {
+    pushAuditParams({});
+  }
+
+  function filterAuditByActor(actorId: string) {
+    const applied = auditPage?.filters;
+    pushAuditParams({
+      auditEntity: applied?.entityType ?? "",
+      auditEntityId: applied?.entityId ?? "",
+      auditAction: applied?.action ?? "",
+      auditActor: actorId,
+      auditFrom: applied?.fromInput ?? "",
+      auditTo: applied?.toInput ?? "",
+    });
+  }
+
+  function pageAudit(direction: AuditPagerDirection) {
+    const applied = auditPage?.filters;
+    // Filters are carried across a page move; only the cursor changes.
+    const carried = {
+      auditEntity: applied?.entityType ?? "",
+      auditEntityId: applied?.entityId ?? "",
+      auditAction: applied?.action ?? "",
+      auditActor: applied?.actorId ?? "",
+      auditFrom: applied?.fromInput ?? "",
+      auditTo: applied?.toInput ?? "",
+    };
+
+    if (direction === "newest") {
+      pushAuditParams(carried);
+      return;
+    }
+
+    pushAuditParams({
+      ...carried,
+      ...(direction === "older"
+        ? { auditBefore: auditPage?.olderCursor ?? "" }
+        : { auditAfter: auditPage?.newerCursor ?? "" }),
     });
   }
 
@@ -520,6 +624,18 @@ export default function AdminDashboardClient(props: {
               onClick={() => changeTab("handbook")}
             >
               Handbook
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              className={`tab ${activeTab === "audit" ? "is-active" : ""}`}
+              aria-selected={activeTab === "audit"}
+              aria-controls="panel-audit"
+              id="tab-audit"
+              onClick={() => changeTab("audit")}
+            >
+              Audit log
             </button>
           </div>
 
@@ -923,6 +1039,27 @@ export default function AdminDashboardClient(props: {
               </a>
             </p>
             <p className="small">{satHandbook.note}</p>
+          </div>
+
+          {/* Audit log panel. Unlike its siblings this one has no --scroll:
+              a 60vh cap would bury the pager below the fold on every page. */}
+          <div
+            role="tabpanel"
+            id="panel-audit"
+            aria-labelledby="tab-audit"
+            className="tab-panel"
+            hidden={activeTab !== "audit"}
+          >
+            <AuditLogPanel
+              page={auditPage}
+              isActive={activeTab === "audit"}
+              isPending={isPending}
+              benefits={benefits}
+              onApplyFilters={applyAuditFilters}
+              onClearFilters={clearAuditFilters}
+              onPage={pageAudit}
+              onFilterByActor={filterAuditByActor}
+            />
           </div>
         </div>
       </section>

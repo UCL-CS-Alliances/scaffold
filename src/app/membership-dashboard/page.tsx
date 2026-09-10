@@ -15,6 +15,7 @@ import {
   getAdminSelectedMember,
   getMembershipTierOptions,
 } from "@/lib/membership-dashboard-admin";
+import { getAuditLogPage } from "@/lib/audit-log-admin";
 import AdminDashboard from "@/components/membership-dashboard/AdminDashboard";
 import MemberDashboard from "@/components/membership-dashboard/MemberDashboard";
 import SignInForm from "@/components/SignInForm";
@@ -93,7 +94,10 @@ export default async function MembershipDashboardPage(props: Props) {
   // 3) Admin view
   if (isAdmin) {
     const selectedUserId = pickFirst(sp?.userId) ?? null;
-    const tab = pickFirst(sp?.tab) ?? null; // "members" | "benefits" | "handbook"
+    // "members" | "benefits" | "handbook" | "audit"
+    const tab = pickFirst(sp?.tab) ?? null;
+    // Equality, not truthiness: this decides whether a query runs at all.
+    const wantsAudit = tab === "audit";
 
     // Resolved before the batch because the redemption stats are computed from
     // it; the client component receives the same list.
@@ -130,6 +134,16 @@ export default async function MembershipDashboardPage(props: Props) {
     // Feeds the editor's step-deletion warning: how many partners' progress
     // rows cascade away with each step.
     const stepProgressCounts = await getBenefitActionProgressPartnerCounts(prisma);
+
+    // Only fetched when the audit tab is actually open. `null` is not "no
+    // entries" — it tells the panel the server did not fetch on this render,
+    // which is what lets it show a loading state on first entry and keep the
+    // previous page on screen while a filter change is in flight.
+    //
+    // Outside the Promise.all deliberately: it depends on nothing in there,
+    // and on the pooled connection_limit=1 database every query serialises, so
+    // widening that concurrent burst buys nothing and costs pool pressure.
+    const auditPage = wantsAudit ? await getAuditLogPage(sp) : null;
 
     // The trail belongs to the organisation, so it needs the selected member's
     // organisation and cannot join the batch above.
@@ -198,6 +212,7 @@ export default async function MembershipDashboardPage(props: Props) {
         benefitStats={benefitStats}
         openRequestQueue={openRequestQueue}
         benefitAuditTrail={benefitAuditTrail}
+        auditPage={auditPage}
         partnerNotes={partnerNotes}
         partnerProgress={partnerProgress}
         partnerOpenRequests={partnerOpenRequests}
