@@ -448,6 +448,18 @@ model AuditLog {
   ipAddress String?
   userAgent String?
 
+  // "History for this entity" — the original access path, and the admin
+  // audit tab's entity filter.
   @@index([entityType, entityId])
-  @@index([actorId])
+  // Time-ordered browsing (the admin audit tab). `timestamp` defaults to
+  // CURRENT_TIMESTAMP, which in Postgres is the *transaction* timestamp, so
+  // rows written in one transaction tie exactly; `id` is the tiebreak that
+  // makes the keyset pagination a total order.
+  @@index([timestamp, id])
+  @@index([entityType, timestamp])
+  @@index([action, timestamp])
+  // Supersedes the plain @@index([actorId]): "this actor, newest first" had
+  // to sort every row an actor ever produced. actorId stays the leading
+  // column, so ON DELETE SET NULL maintenance is unaffected.
+  @@index([actorId, timestamp])
 }
