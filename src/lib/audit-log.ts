@@ -19,18 +19,23 @@ import type { Prisma, PrismaClient } from "@prisma/client";
  *   loudly and roll back together; fire-and-forget callers can catch.
  */
 
-// Schema's AuditLog.action is a bare String; constrain call sites to these.
-export type AuditAction =
-  | "CREATE"
-  | "UPDATE"
-  | "DELETE"
-  | "LOGIN"
-  | "PASSWORD_RESET"
-  | "PASSWORD_CHANGE"
-  | "BENEFIT_REQUEST_RAISED"
-  | "BENEFIT_REQUEST_ACKNOWLEDGED"
-  | "BENEFIT_REQUEST_STARTED"
-  | "BENEFIT_REQUEST_CLOSED";
+// The action and entityType vocabularies live in audit-log-shared, which
+// imports nothing, so the admin audit tab's client component can read them
+// without dragging next/headers into the browser bundle. Re-exported here so
+// the 20 existing write sites keep importing what they always did.
+export {
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+  LEGACY_AUDIT_ENTITY_TYPES,
+} from "@/lib/audit-log-shared";
+
+export type {
+  AuditAction,
+  AuditEntityType,
+  LegacyAuditEntityType,
+} from "@/lib/audit-log-shared";
+
+import type { AuditAction } from "@/lib/audit-log-shared";
 
 // Accepts the shared client or a transaction client, so callers can include
 // the audit write in an existing $transaction.
