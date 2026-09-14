@@ -30,8 +30,8 @@ type AdminDashboardProps = AdminDashboardSummary & {
   selectedMember: AdminSelectedMember | null;
 
   benefits: CatalogueBenefit[];
-  editorBenefits: EditorBenefit[];
-  tierOptions: MembershipTierOption[];
+  editorBenefits: EditorBenefit[] | null;
+  tierOptions: MembershipTierOption[] | null;
   benefitStats: AdminBenefitRedemptionStat[];
   openRequestQueue: AdminOpenBenefitRequest[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
@@ -39,7 +39,7 @@ type AdminDashboardProps = AdminDashboardSummary & {
   partnerNotes: Record<string, string>;
   partnerProgress: BenefitActionProgressMap;
   partnerOpenRequests: Record<string, OrganisationBenefitRequest>;
-  stepProgressCounts: Record<number, number>;
+  stepProgressCounts: Record<number, number> | null;
   partnerSurveyUrl: string | null;
 
   initialTab?: string | null;

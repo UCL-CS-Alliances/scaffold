@@ -238,7 +238,12 @@ export async function getAdminBenefitAuditTrail(
     },
     orderBy: { timestamp: "desc" },
     take: 20,
-    include: { actor: true },
+    // Only the three fields the mapping below reads. `actor: true` pulled
+    // every User column — passwordHash included — into the render process;
+    // nothing reached the client, but there is no reason to load it.
+    include: {
+      actor: { select: { firstName: true, lastName: true, email: true } },
+    },
   });
 
   return rows.map((r) => {

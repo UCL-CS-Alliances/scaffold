@@ -259,8 +259,8 @@ export default function AdminDashboardClient(props: {
   selectedUserId: string | null;
   selectedMember: AdminSelectedMember | null;
   benefits: CatalogueBenefit[];
-  editorBenefits: EditorBenefit[];
-  tierOptions: MembershipTierOption[];
+  editorBenefits: EditorBenefit[] | null;
+  tierOptions: MembershipTierOption[] | null;
   benefitStats: AdminBenefitRedemptionStat[];
   openRequestQueue: AdminOpenBenefitRequest[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
@@ -268,7 +268,7 @@ export default function AdminDashboardClient(props: {
   partnerNotes: Record<string, string>;
   partnerProgress: BenefitActionProgressMap;
   partnerOpenRequests: Record<string, OrganisationBenefitRequest>;
-  stepProgressCounts: Record<number, number>;
+  stepProgressCounts: Record<number, number> | null;
   partnerSurveyUrl: string | null;
   initialTab?: string | null;
 }) {
@@ -793,12 +793,21 @@ export default function AdminDashboardClient(props: {
                 </div>
 
                 {benefitsView === "editor" ? (
-                  <BenefitCatalogueEditor
-                    benefits={editorBenefits}
-                    tierOptions={tierOptions}
-                    stepProgressCounts={stepProgressCounts}
-                    partnerSurveyUrl={partnerSurveyUrl}
-                  />
+                  // null means the server did not fetch the editor's data on
+                  // this render — the ?view=editor navigation is still in
+                  // flight — not that the catalogue is empty. Rendering the
+                  // editor against [] would flash an empty catalogue, which on
+                  // a live-editing surface reads as data loss.
+                  editorBenefits === null ? (
+                    <p className="small">Loading the catalogue editor…</p>
+                  ) : (
+                    <BenefitCatalogueEditor
+                      benefits={editorBenefits}
+                      tierOptions={tierOptions ?? []}
+                      stepProgressCounts={stepProgressCounts ?? {}}
+                      partnerSurveyUrl={partnerSurveyUrl}
+                    />
+                  )
                 ) : benefitsView === "requests" ? (
                   openRequestQueue.length === 0 ? (
                     <p className="small">

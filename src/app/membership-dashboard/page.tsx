@@ -99,6 +99,14 @@ export default async function MembershipDashboardPage(props: Props) {
     // Equality, not truthiness: this decides whether a query runs at all.
     const wantsAudit = tab === "audit";
 
+    // The catalogue editor renders only when ?view=editor and no partner is
+    // selected, so ?view= alone is a safe over-approximation of "the editor
+    // could be on screen" — it never starves the editor, and it keeps six
+    // round trips off every page load that is not the editor, which is most
+    // of them. Its four props go null when not fetched, same contract as the
+    // audit page: "not loaded", not "empty".
+    const wantsEditor = pickFirst(sp?.view) === "editor";
+
     // Resolved before the batch because the redemption stats are computed from
     // it; the client component receives the same list.
     const benefits = await getBenefitCatalogue(prisma);
@@ -123,17 +131,21 @@ export default async function MembershipDashboardPage(props: Props) {
       prisma.user.count(),
       // The editor's own shape: retired benefits included, database ids and
       // step rows surfaced. Member-facing consumers keep the list above.
-      getBenefitCatalogueForEditor(prisma),
-      getMembershipTierOptions(),
+      wantsEditor
+        ? getBenefitCatalogueForEditor(prisma)
+        : Promise.resolve(null),
+      wantsEditor ? getMembershipTierOptions() : Promise.resolve(null),
       // The cross-partner request queue (benefits tab, ?view=requests).
       getAdminOpenBenefitRequests(),
       // The programme-wide survey link, for the editor's settings card.
-      getPartnerSurveyUrl(prisma),
+      wantsEditor ? getPartnerSurveyUrl(prisma) : Promise.resolve(null),
     ]);
 
     // Feeds the editor's step-deletion warning: how many partners' progress
     // rows cascade away with each step.
-    const stepProgressCounts = await getBenefitActionProgressPartnerCounts(prisma);
+    const stepProgressCounts = wantsEditor
+      ? await getBenefitActionProgressPartnerCounts(prisma)
+      : null;
 
     // Only fetched when the audit tab is actually open. `null` is not "no
     // entries" — it tells the panel the server did not fetch on this render,
