@@ -150,6 +150,12 @@ async function assignRole(userId: string, roleId: number) {
 //   3. NEW: Seed Apps
 // ─────────────────────────────────────────────────────────────
 //
+// The IXN Workflow Manager runs as its own deployment, so its App row carries
+// `isInternal: false` and the URL to send entitled users to. It is the same in
+// every environment — there is no staging IXN to point a preview at — so it
+// stays a literal here rather than becoming another env var to keep in sync.
+const IXN_EXTERNAL_URL = 'https://ixn.cs.ucl.ac.uk';
+
 async function seedApps() {
   console.log('\nSeeding Apps…');
 
@@ -165,14 +171,22 @@ async function seedApps() {
   });
   console.log(`  - App MEMBERSHIP_DASHBOARD (id=${membershipDashboard.id})`);
 
+  // Unlike the other two, this upsert writes on `update` as well as `create`:
+  // the row already exists on every database that has been seeded before, so a
+  // create-only change would never reach one — including production.
   const ixn = await prisma.app.upsert({
     where: { key: 'IXN_WORKFLOW_MANAGER' },
-    update: {},
+    update: {
+      isInternal: false,
+      externalUrl: IXN_EXTERNAL_URL,
+    },
     create: {
       key: 'IXN_WORKFLOW_MANAGER',
       name: 'IXN Workflow Manager',
       basePath: '/ixn-workflow-manager',
       description: 'Workflow management system for IXN.',
+      isInternal: false,
+      externalUrl: IXN_EXTERNAL_URL,
     },
   });
   console.log(`  - App IXN_WORKFLOW_MANAGER (id=${ixn.id})`);

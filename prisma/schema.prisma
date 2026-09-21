@@ -96,7 +96,7 @@ enum OrganisationType {
 
 model Role {
   id    Int    @id @default(autoincrement())
-  key   String @unique // "ADMIN", "PARTNER", "ACADEMIC"
+  key   String @unique // "ADMIN", "MEMBER", "STUDENT", "MODULE_LEADER"
   label String
 
   userRoles      UserRole[]
@@ -155,7 +155,7 @@ model Membership {
 
 model App {
   id          Int     @id @default(autoincrement())
-  key         String  @unique // "MEMBERSHIP_DASHBOARD", "IXN", "TALENT_DISCOVERY"
+  key         String  @unique // "MEMBERSHIP_DASHBOARD", "IXN_WORKFLOW_MANAGER", "TALENT_DISCOVERY"
   name        String
   basePath    String // e.g. "/apps/membership"
   isInternal  Boolean @default(true)
