@@ -6,19 +6,6 @@ import { unstable_noStore as noStore } from "next/cache";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { prisma } from "@/lib/prisma";
 
-function appKeyToPath(appKey: string): string | null {
-  switch (appKey) {
-    case "MEMBERSHIP_DASHBOARD":
-      return "/membership-dashboard";
-    case "IXN_WORKFLOW_MANAGER":
-      return "/ixn-workflow-manager";
-    case "TALENT_DISCOVERY":
-      return "/talent-discovery";
-    default:
-      return null;
-  }
-}
-
 export default async function PostSignInRouterPage() {
   noStore();
 
@@ -37,23 +24,31 @@ export default async function PostSignInRouterPage() {
 
   const userId = (session.user as any).id as string;
 
+  // basePath comes from the App registry rather than a switch in this file, so
+  // adding an app needs no edit here. Selected through the user row because
+  // this page already reads it — one query rather than two on the pooled
+  // connection.
+  //
+  // basePath is also the right destination for an external app
+  // (isInternal: false): that route runs the access gate and explains the
+  // separate sign-in before linking out, both of which redirecting straight to
+  // externalUrl would skip.
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { defaultApp: { select: { key: true } } },
+    select: {
+      defaultApp: { select: { key: true, basePath: true } },
+    },
   });
 
-  const defaultAppKey = user?.defaultApp?.key ?? null;
-  if (!defaultAppKey) redirect("/");
-
-  const basePath = appKeyToPath(defaultAppKey);
-  if (!basePath) redirect("/");
+  const defaultApp = user?.defaultApp ?? null;
+  if (!defaultApp) redirect("/");
 
   // Role-aware entry points for Talent Discovery
-  if (defaultAppKey === "TALENT_DISCOVERY") {
+  if (defaultApp.key === "TALENT_DISCOVERY") {
     if (isStudent) redirect("/talent-discovery?view=student");
     // Non-admins who are not students: lowest-threshold partner view by default
     redirect("/talent-discovery?view=job-board");
   }
 
-  redirect(basePath);
+  redirect(defaultApp.basePath);
 }

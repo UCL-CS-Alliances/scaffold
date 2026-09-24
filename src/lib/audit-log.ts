@@ -30,7 +30,8 @@ export type AuditAction =
   | "BENEFIT_REQUEST_RAISED"
   | "BENEFIT_REQUEST_ACKNOWLEDGED"
   | "BENEFIT_REQUEST_STARTED"
-  | "BENEFIT_REQUEST_CLOSED";
+  | "BENEFIT_REQUEST_CLOSED"
+  | "IXN_HANDOFF";
 
 // Accepts the shared client or a transaction client, so callers can include
 // the audit write in an existing $transaction.
