@@ -35,7 +35,7 @@ the first Production build uses the reviewed configuration.
 | `NEXTAUTH_URL` | `http://localhost:3000` | **unset** | `https://<prod-host>` | Leave unset on Preview so NextAuth uses the per-deployment URL. |
 | `CONTACT_FROM_EMAIL` | optional | optional | optional | Only the From header; email uses Ethereal test accounts until Graph/SMTP is added. |
 | `IXN_HANDOFF_SECRET` | optional | ✅ (its own) | ✅ (its own) | Server-only. Shared with the IXN deployment's `HANDOFF_SECRET` for the same environment, and **different** per environment. Unset (with the URL below) disables the handoff: the IXN gate page then shows the plain link. `openssl rand -base64 32`. |
-| `IXN_HANDOFF_CALLBACK_URL` | optional | IXN preview `/handoff` | `https://<ixn-host>/handoff` | IXN's handoff landing page. Both handoff variables must be set together. |
+| `IXN_HANDOFF_CALLBACK_URL` | optional | IXN preview `/handoff` | `https://ixn.uclcomputerscience.org/handoff` | IXN's handoff landing page. The handoff runs on `ixn.uclcomputerscience.org`; `ixn.cs.ucl.ac.uk` is a separate build without it and returns 404 there. Both handoff variables must be set together. |
 
 Set `DATABASE_URL`, `NEXTAUTH_SECRET` and `IXN_HANDOFF_SECRET` as Vercel Sensitive variables. A contributor does not need to see or edit these values for Git-based Preview deployments: the deployment owner can configure them once at project level. On Vercel Pro, a Developer can manage Preview/Development variables but not Production variables; keep Production changes with an Owner or Member. Environment-variable changes apply only to new deployments, so redeploy the affected branch after every change.
 

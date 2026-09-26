@@ -2,7 +2,7 @@
 //
 // The IXN Workflow Manager is a separate deployment — its own Next.js app and
 // its own database — so `/ixn-workflow-manager` gates access and then links
-// out to it rather than embedding it: ixn.cs.ucl.ac.uk sends
+// out to it rather than embedding it: ixn.uclcomputerscience.org sends
 // `X-Frame-Options: DENY` and a `frame-ancestors 'none'` CSP, so an iframe
 // renders nothing. Same reasoning as satHandbook.ts, and the same shape.
 //

@@ -46,7 +46,7 @@ export const services: Service[] = [
     audience: ["partners"],
     pathways: ["talent", "innovation-management"],
     actionLabel: "Explore the IXN platform",
-    actionUrl: "https://ixn.cs.ucl.ac.uk/",
+    actionUrl: "https://ixn.uclcomputerscience.org/",
     relatedServiceSlugs: ["ixn-information"],
     showInNav: true,
     navActive: true,

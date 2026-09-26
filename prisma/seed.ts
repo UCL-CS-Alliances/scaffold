@@ -154,7 +154,11 @@ async function assignRole(userId: string, roleId: number) {
 // `isInternal: false` and the URL to send entitled users to. It is the same in
 // every environment — there is no staging IXN to point a preview at — so it
 // stays a literal here rather than becoming another env var to keep in sync.
-const IXN_EXTERNAL_URL = 'https://ixn.cs.ucl.ac.uk';
+//
+// ixn.uclcomputerscience.org is the deployment that carries the handoff
+// (`/handoff` and the `handoff` NextAuth provider); ixn.cs.ucl.ac.uk is a
+// separate build without it, so a link there can never sign a user in.
+const IXN_EXTERNAL_URL = 'https://ixn.uclcomputerscience.org';
 
 async function seedApps() {
   console.log('\nSeeding Apps…');
