@@ -2,8 +2,12 @@
 import { redirect } from "next/navigation";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { userCanAccessApp } from "@/lib/access-control";
+import { getAppByKey, resolveAppDestination } from "@/lib/apps";
+import { isIxnHandoffConfigured } from "@/lib/ixn-handoff";
+import { prisma } from "@/lib/prisma";
 import SignInForm from "@/components/SignInForm";
 import { pageCopy } from "@/content/pageCopy";
+import { ixnApp } from "@/content/ixnApp";
 
 export default async function IxnWorkflowManagerPage() {
   const copy = pageCopy.ixnWorkflowManager;
@@ -33,6 +37,21 @@ if (!canAccess) {
     );
   }
 
+  // With the handoff configured the CTA goes through our issuer route, which
+  // re-runs this access check and sends the browser on to IXN signed in.
+  // Without it, fall back to the plain link off the App registry — resolved
+  // only after the access check, so an unauthorised user never pays for the
+  // read.
+  const handoffConfigured = isIxnHandoffConfigured();
+  const app = handoffConfigured
+    ? null
+    : await getAppByKey(prisma, "IXN_WORKFLOW_MANAGER");
+  const destination = handoffConfigured
+    ? "/api/handoff/ixn"
+    : app
+      ? resolveAppDestination(app)
+      : null;
+  const note = handoffConfigured ? ixnApp.handoffNote : ixnApp.note;
 
   return (
     <section className="content-section">
@@ -41,7 +60,22 @@ if (!canAccess) {
       </header>
 
       <p>{copy.description}</p>
-      {/* Later: actual IXN app content here */}
+
+      {destination && (
+        <>
+          <p>
+            <a
+              className="button-link button-link--primary"
+              href={destination}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {ixnApp.ctaLabel}
+            </a>
+          </p>
+          <p className="small">{note}</p>
+        </>
+      )}
     </section>
   );
 }
