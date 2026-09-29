@@ -5,6 +5,8 @@ import { BenefitRequestStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getServerAuthSession } from "@/lib/getServerAuthSession";
 import { recordAuditLog, type AuditAction } from "@/lib/audit-log";
+import { getSatTeamManager } from "@/content/contactRouting";
+import { sendMailgun } from "@/lib/email/enquiryMailer";
 import {
   getBenefitCatalogue,
   OPEN_BENEFIT_REQUEST_STATUSES,
@@ -431,6 +433,19 @@ export type RequestBenefitResult =
 const REQUEST_NOTE_MAX = 2000;
 const REQUEST_OPTIONAL_FIELD_MAX = 200;
 
+type BenefitRequestNotification = {
+  requestId: number;
+  organisationName: string;
+  benefitLabel: string;
+  requesterName: string;
+  requesterEmail: string | null;
+  note: string;
+  preferredTimeframe: string | null;
+  contactPreference: string | null;
+  recipientEmail: string;
+  recipientName: string;
+};
+
 /**
  * A member registers their organisation's interest in a benefit — the first
  * member-facing (non-admin) mutation in this file. It does NOT mark the
@@ -506,14 +521,22 @@ export async function requestBenefitRedemptionAction(input: {
     };
   }
 
+  let notification: BenefitRequestNotification | null = null;
+
   try {
-    return await prisma.$transaction(
+    const result = await prisma.$transaction(
       async (tx): Promise<RequestBenefitResult> => {
         // The organisation comes from the user's own record, never from the
         // client — a member can only ever request for their organisation.
         const user = await tx.user.findUnique({
           where: { id: userId },
-          select: { organisationId: true },
+          select: {
+            email: true,
+            firstName: true,
+            lastName: true,
+            organisationId: true,
+            organisation: { select: { name: true } },
+          },
         });
         if (!user?.organisationId) {
           return {
@@ -648,9 +671,79 @@ export async function requestBenefitRedemptionAction(input: {
           },
         });
 
+        const manager = await tx.membership.findUnique({
+          where: { organisationId },
+          select: {
+            clientExperienceManager: {
+              select: { email: true, firstName: true, lastName: true },
+            },
+          },
+        });
+        const assignedManager = manager?.clientExperienceManager;
+        const fallbackManager = getSatTeamManager();
+        const recipient = assignedManager ?? {
+          email: fallbackManager.email,
+          firstName: fallbackManager.name,
+          lastName: "",
+        };
+
+        notification = {
+          requestId: request.id,
+          organisationName: user.organisation?.name ?? "Unknown organisation",
+          benefitLabel: benefit.label,
+          requesterName: `${user.firstName} ${user.lastName}`.trim(),
+          requesterEmail: user.email,
+          note,
+          preferredTimeframe,
+          contactPreference,
+          recipientEmail: recipient.email,
+          recipientName: `${recipient.firstName} ${recipient.lastName}`.trim(),
+        };
+
         return { ok: true };
       },
     );
+
+    const emailNotification = notification as BenefitRequestNotification | null;
+    if (result.ok && emailNotification) {
+      try {
+        const appUrl = process.env.PUBLIC_APP_URL?.replace(/\/$/, "");
+        const requestUrl = appUrl
+          ? `${appUrl}/membership-dashboard?tab=benefits&view=requests`
+          : null;
+
+        await sendMailgun({
+          from: process.env.MAILGUN_SENDING_EMAIL!,
+          to: emailNotification.recipientEmail,
+          cc: [],
+          reply_to: emailNotification.requesterEmail ?? "",
+          subject: `New benefit redemption request: ${emailNotification.benefitLabel}`,
+          text: [
+            `Hi ${emailNotification.recipientName || "there"},`,
+            "",
+            `${emailNotification.requesterName} has requested the ${emailNotification.benefitLabel} benefit for ${emailNotification.organisationName}.`,
+            "",
+            `Request ID: ${emailNotification.requestId}`,
+            `Requester email: ${emailNotification.requesterEmail ?? "Not available"}`,
+            `Preferred timeframe: ${emailNotification.preferredTimeframe ?? "Not specified"}`,
+            `Best contact: ${emailNotification.contactPreference ?? "Not specified"}`,
+            "",
+            "What they would like:",
+            emailNotification.note,
+            ...(requestUrl ? ["", `Open the request queue: ${requestUrl}`] : []),
+            "",
+            "Kind regards,",
+            "The Strategic Alliances platform",
+          ].join("\n"),
+        });
+      } catch (error) {
+        // The request is already committed; Mailgun downtime must not make the
+        // partner resubmit and risk a misleading duplicate-request error.
+        console.error("Benefit redemption notification failed:", error);
+      }
+    }
+
+    return result;
   } catch (error) {
     // The partial unique index closing the race two concurrent submissions
     // (or a double-click replay) can win: the loser's create lands here and

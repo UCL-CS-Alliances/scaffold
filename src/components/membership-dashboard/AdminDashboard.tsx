@@ -1,5 +1,6 @@
 // src/components/membership-dashboard/AdminDashboard.tsx
 import AdminDashboardClient from "./AdminDashboardClient";
+import type { AuditLogPage } from "@/lib/audit-log-admin";
 import type { AdminDashboardSummary } from "@/lib/membership-dashboard";
 import type {
   AdminBenefitAuditEntry,
@@ -29,15 +30,16 @@ type AdminDashboardProps = AdminDashboardSummary & {
   selectedMember: AdminSelectedMember | null;
 
   benefits: CatalogueBenefit[];
-  editorBenefits: EditorBenefit[];
-  tierOptions: MembershipTierOption[];
+  editorBenefits: EditorBenefit[] | null;
+  tierOptions: MembershipTierOption[] | null;
   benefitStats: AdminBenefitRedemptionStat[];
   openRequestQueue: AdminOpenBenefitRequest[];
   benefitAuditTrail: AdminBenefitAuditEntry[];
+  auditPage: AuditLogPage | null;
   partnerNotes: Record<string, string>;
   partnerProgress: BenefitActionProgressMap;
   partnerOpenRequests: Record<string, OrganisationBenefitRequest>;
-  stepProgressCounts: Record<number, number>;
+  stepProgressCounts: Record<number, number> | null;
   partnerSurveyUrl: string | null;
 
   initialTab?: string | null;
@@ -67,6 +69,7 @@ export default function AdminDashboard({
   benefitStats,
   openRequestQueue,
   benefitAuditTrail,
+  auditPage,
   partnerNotes,
   partnerProgress,
   partnerOpenRequests,
@@ -104,6 +107,7 @@ export default function AdminDashboard({
           benefitStats={benefitStats}
           openRequestQueue={openRequestQueue}
           benefitAuditTrail={benefitAuditTrail}
+          auditPage={auditPage}
           partnerNotes={partnerNotes}
           partnerProgress={partnerProgress}
           partnerOpenRequests={partnerOpenRequests}

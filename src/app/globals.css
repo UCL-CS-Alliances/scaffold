@@ -1196,3 +1196,73 @@ article.pathway hr {
   text-align: left;
   vertical-align: top;
 }
+
+/* Admin audit log tab */
+
+.audit-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin: 1rem 0 0.5rem;
+}
+
+.audit-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 11rem;
+  flex: 1 1 11rem;
+}
+
+.audit-filter-actions {
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+/* .pill's geometry without its cursor and hover fill: entity type and action
+   read as labels here, and .pill correctly signals "clickable" — which on this
+   tab is reserved for the actor filter link. */
+.audit-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--ucl-sky);
+  color: var(--ucl-ink);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.audit-detail-list {
+  display: grid;
+  grid-template-columns: minmax(8rem, max-content) 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0;
+}
+
+.audit-detail-list dt {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.audit-detail-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.audit-detail {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--ucl-sand);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 20rem;
+  overflow: auto;
+}
