@@ -24,6 +24,7 @@ export const AUDIT_ACTIONS = [
   "BENEFIT_REQUEST_ACKNOWLEDGED",
   "BENEFIT_REQUEST_STARTED",
   "BENEFIT_REQUEST_CLOSED",
+  "IXN_HANDOFF",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

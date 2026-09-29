@@ -73,6 +73,7 @@ const ACTION_LABELS: Record<string, string> = {
   BENEFIT_REQUEST_ACKNOWLEDGED: "Request acknowledged",
   BENEFIT_REQUEST_STARTED: "Request started",
   BENEFIT_REQUEST_CLOSED: "Request closed",
+  IXN_HANDOFF: "Signed in to IXN",
 };
 
 function entityTypeLabel(v: string) {
