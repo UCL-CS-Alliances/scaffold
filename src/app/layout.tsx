@@ -6,6 +6,7 @@ import ClientLayout from "@/components/ClientLayout";
 export const metadata: Metadata = {
   title: "Alliances Platform - UCL Computer Science",
   description: "A self-service application intended for use by industry partners, academic staff, and students; maintained by the Strategic Alliances Team at UCL Computer Science.",
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({
